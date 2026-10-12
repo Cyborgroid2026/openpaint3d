@@ -1,77 +1,94 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Path = System.IO.Path;
 
 namespace OpenPaint3D;
 
 public sealed class MainWindow : Window
 {
-    private static readonly IBrush Accent = new SolidColorBrush(Color.Parse("#0078D7"));
-    private static readonly IBrush AccentLight = new SolidColorBrush(Color.Parse("#E5F1FB"));
-    private static readonly IBrush Line = new SolidColorBrush(Color.Parse("#E1E1E1"));
-    private static readonly IBrush TileBg = new SolidColorBrush(Color.Parse("#F4F4F4"));
-    private static readonly IBrush Muted = new SolidColorBrush(Color.Parse("#666666"));
-    private static readonly IBrush Dark = new SolidColorBrush(Color.Parse("#262626"));
-    private static readonly IBrush PanelBg = new SolidColorBrush(Color.Parse("#FAFAFA"));
+    private static readonly IBrush Muted = P3.Muted;
+    private static readonly IBrush Dark = P3.Text;
+    private static readonly IBrush Line = P3.PaneLine;
+    private static readonly IBrush AccentLight = new SolidColorBrush(Color.Parse("#DCE8F7"));
 
+    // 6 x 3 palette, as laid out in the colour section
     private static readonly string[] Palette =
     {
-        "#000000", "#4D4D4D", "#999999", "#C8C8C8", "#FFFFFF", "#8B572A",
-        "#E81123", "#F7630C", "#FFB900", "#FCE100", "#BAD80A", "#16C60C",
-        "#00B294", "#00BCF2", "#0078D7", "#0037DA", "#5C2D91", "#B4009E",
-        "#E3008C", "#FF8FB1", "#F4C7A1", "#C19A6B", "#2D7D46", "#1B3A5C",
+        "#FFFFFF", "#C3C3C3", "#585858", "#000000", "#88001B", "#EC1C24",
+        "#FF7F27", "#FFCA18", "#FDECA6", "#FFF200", "#C4FF0E", "#0ED145",
+        "#8CFFFB", "#00A8F3", "#3F48CC", "#B83DBA", "#FFAEC8", "#B97A56",
     };
 
     private static readonly string[] BrushNames = { "마커", "캘리그래피 펜", "유화 브러시", "수채화", "픽셀 펜", "연필", "지우개", "크레용", "스프레이 캔" };
     private static readonly string[] Finishes = { "무광", "유광", "무광 금속", "광택 금속" };
 
-    private sealed record Preset(string Name, string Light, float Brightness, float Ambient, float Angle, uint Filter, float Tint);
+    private sealed record Preset(string Name, string Swatch, string Light, float Brightness, float Ambient, float Angle, uint Filter, float Tint);
 
+    // filter swatches of the effects panel (light colour + colour grade)
     private static readonly Preset[] Presets =
     {
-        new("없음", "#FFFFFF", 1f, 0.35f, 0, 0, 0),
-        new("해돋이", "#FFB27A", 1.05f, 0.35f, -60, 3, 0.45f),
-        new("한낮", "#FFFFFF", 1.3f, 0.45f, 0, 0, 0),
-        new("노을", "#FF7A9A", 0.95f, 0.3f, 60, 0, 0.5f),
-        new("밤", "#6E8BFF", 0.6f, 0.2f, 0, 4, 0.6f),
-        new("북극광", "#7FFFD4", 0.9f, 0.3f, 200, 0, 0.45f),
-        new("흑백", "#FFFFFF", 1f, 0.35f, 0, 1, 0),
-        new("세피아", "#FFFFFF", 1f, 0.35f, 0, 2, 0),
-        new("빈티지", "#FFE0B0", 1f, 0.35f, 0, 8, 0.2f),
-        new("느와르", "#FFFFFF", 1.1f, 0.25f, 30, 9, 0),
-        new("대비 강하게", "#FFFFFF", 1.1f, 0.3f, 0, 6, 0),
-        new("비네트", "#FFFFFF", 1f, 0.35f, 0, 7, 0),
+        new("없음", "#DDE1E6", "#FFFFFF", 1f, 0.35f, 0, 0, 0),
+        new("서리", "#E3E6F5", "#E6ECFF", 1.05f, 0.4f, 0, 4, 0.25f),
+        new("벚꽃", "#F2DCE6", "#FFD6E5", 1.05f, 0.38f, 0, 0, 0.35f),
+        new("라일락", "#E7D9EE", "#E3CCFF", 1f, 0.36f, 0, 0, 0.35f),
+        new("새싹", "#DDF0D6", "#DFFFD0", 1.05f, 0.38f, 0, 0, 0.3f),
+        new("모래", "#F1E3B9", "#FFF0C2", 1.05f, 0.38f, 0, 3, 0.3f),
+        new("해돋이", "#F0C3B4", "#FFB27A", 1.05f, 0.35f, -60, 3, 0.45f),
+        new("황금", "#F2B562", "#FFC266", 1.1f, 0.35f, -30, 3, 0.5f),
+        new("안개", "#D5DCD9", "#F2F2F2", 1.1f, 0.55f, 0, 0, 0.1f),
+        new("민트", "#CFEDE4", "#C8FFE9", 1f, 0.38f, 0, 0, 0.35f),
+        new("하늘", "#D6EEF2", "#CDEFFF", 1.05f, 0.4f, 0, 4, 0.3f),
+        new("석양", "#9C93B8", "#B59CFF", 0.9f, 0.3f, 50, 0, 0.45f),
+        new("숲", "#96B79A", "#9FD8A0", 0.9f, 0.32f, 0, 0, 0.45f),
+        new("돌", "#7F9399", "#C9D6DB", 0.9f, 0.3f, 0, 1, 0.2f),
+        new("흑백", "#888B8E", "#FFFFFF", 1f, 0.35f, 0, 1, 0),
+        new("세피아", "#8F7867", "#FFFFFF", 1f, 0.35f, 0, 2, 0),
+        new("노을", "#F08BA2", "#FF7A9A", 0.95f, 0.3f, 60, 0, 0.5f),
+        new("밤", "#1D1A2B", "#6E8BFF", 0.6f, 0.2f, 0, 4, 0.6f),
+        new("심해", "#1D1F6E", "#5A6BFF", 0.7f, 0.25f, 0, 4, 0.55f),
+        new("느와르", "#22272B", "#FFFFFF", 1.1f, 0.25f, 30, 9, 0),
+        new("빈티지", "#A0402F", "#FFE0B0", 1f, 0.35f, 0, 8, 0.2f),
+        new("비네트", "#5E6A63", "#FFFFFF", 1f, 0.35f, 0, 7, 0),
     };
 
     private readonly Engine _engine = new(1920, 1080);
     private readonly ToolState S = new();
     private readonly PaintSurface _surface;
     private readonly ContentControl _panel = new();
-    private readonly Dictionary<Tool, Border> _tabs = new();
+    private readonly Border _side = new();
+    private readonly ScrollViewer _sideScroll = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+    private readonly Dictionary<Tool, FlatButton> _tabs = new();
     private readonly List<Action> _colorWatchers = new();
-    private readonly Button _undo, _redo, _history, _paste;
-    private readonly ToggleButton _view3d = new();
-    private readonly Button _reset3d = new();
-    private readonly TextBlock _zoomText = new() { VerticalAlignment = VerticalAlignment.Center, Width = 48, TextAlignment = TextAlignment.Right };
-    private readonly TextBlock _sizeText = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Muted };
-    private readonly Slider _zoomSlider = new() { Minimum = 5, Maximum = 800, Width = 160, VerticalAlignment = VerticalAlignment.Center };
+    private readonly FlatButton _undo, _redo, _history, _paste;
+    private FlatButton _selectBtn = null!, _cropBtn = null!, _view3dBtn = null!;
+    private readonly TextBlock _zoomText = new() { VerticalAlignment = VerticalAlignment.Center, HorizontalAlignment = HorizontalAlignment.Center, FontSize = 13 };
+    private readonly TextBlock _titleText = new() { Foreground = Brushes.White, FontSize = 12, VerticalAlignment = VerticalAlignment.Center };
+    private readonly Slider _zoomSlider = new() { Minimum = 5, Maximum = 800, Width = 130, VerticalAlignment = VerticalAlignment.Center };
     private readonly Border _menu = new() { IsVisible = false };
     private readonly ContentControl _menuContent = new();
     private readonly Dictionary<string, Border> _menuItems = new();
-    private bool _syncingZoom, _dirty, _forceClose;
+    private readonly Grid _overlay = new() { IsVisible = false };
+    private Control _maxIcon = null!;
+    private FlatButton _maxBtn = null!;
+    private bool _syncingZoom, _dirty, _forceClose, _editColor, _panelHidden;
     private string? _path;
     private int _stickerTab;
     private string? _libraryCategory;
     private string _libraryQuery = "";
+    private Tool _beforeLibrary = Tool.Shape3D;
+    private uint _clipObject;
 
     private static List<string>? _fonts;
     private static readonly Dictionary<string, IImage> ThumbCache = new();
+    private static readonly List<Color> CustomColors = new();
 
     private static string ConfigDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "openpaint3d");
     private static string StickerDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "openpaint3d", "stickers");
@@ -82,8 +99,10 @@ public sealed class MainWindow : Window
         Height = 880;
         MinWidth = 1000;
         MinHeight = 620;
-        Background = Brushes.White;
+        Background = P3.Pane;
         Icon = LoadIcon();
+        // the dark title strip is part of the app bar, so the window draws its own caption
+        SystemDecorations = SystemDecorations.None;
 
         _fonts ??= FontManager.Current.SystemFonts.Select(f => f.Name).Distinct().OrderBy(n => n).ToList();
         S.Font = _fonts.FirstOrDefault(f => f == "Noto Sans CJK KR") ?? _fonts.FirstOrDefault(f => f.Contains("Nanum")) ?? "";
@@ -94,42 +113,50 @@ public sealed class MainWindow : Window
         _surface.ColorPicked += c => { S.Picking = false; SetColor(c); };
         _surface.SelectionChanged += () => Dispatcher.UIThread.Post(ShowPanel);
 
-        _paste = TopAction("붙여넣기", Icons.Paste, () => _ = Paste());
-        _undo = TopAction("실행 취소", Icons.Undo, Undo);
-        _history = TopAction("기록", Icons.History, () => { });
-        _redo = TopAction("다시 실행", Icons.Redo, Redo);
-        var historyFlyout = new Flyout { Placement = PlacementMode.BottomEdgeAlignedRight };
-        historyFlyout.Opening += (_, _) => historyFlyout.Content = BuildHistory(historyFlyout);
-        _history.Flyout = historyFlyout;
+        _paste = TopButton("붙여넣기", Icons.Paste, () => _ = Paste());
+        _undo = TopButton("실행 취소", Icons.Undo, Undo);
+        _history = TopButton("기록", Icons.History, ShowHistory);
+        _redo = TopButton("다시 실행", Icons.Redo, Redo);
 
-        var main = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
-        main.Children.Add(BuildTopBar());
         var body = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-        Grid.SetRow(body, 1);
-        body.Children.Add(BuildCanvasArea());
-        var side = new Border
-        {
-            Width = 316,
-            Background = PanelBg,
-            BorderBrush = Line,
-            BorderThickness = new Thickness(1, 0, 0, 0),
-            Child = new ScrollViewer { Content = _panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled },
-        };
-        Grid.SetColumn(side, 1);
-        body.Children.Add(side);
+        var left = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        left.Children.Add(BuildSubBar());
+        var area = new Grid { Children = { _surface } };
+        Grid.SetRow(area, 1);
+        left.Children.Add(area);
+        body.Children.Add(left);
+        _side.Background = P3.Pane;
+        _side.BorderBrush = Line;
+        _side.BorderThickness = new Thickness(1, 0, 0, 0);
+        _sideScroll.Content = _panel;
+        _side.Child = _sideScroll;
+        Grid.SetColumn(_side, 1);
+        body.Children.Add(_side);
+
+        var main = new DockPanel();
+        var header = BuildHeader();
+        DockPanel.SetDock(header, Dock.Top);
+        main.Children.Add(header);
         main.Children.Add(body);
 
         BuildMenu();
-        Content = new Grid { Children = { main, _menu } };
+        Content = new Grid { Children = { main, _menu, _overlay, BuildResizeGrips() } };
 
         KeyDown += OnKey;
         Closing += OnClosing;
+        PropertyChanged += (_, e) =>
+        {
+            if (e.Property == WindowStateProperty) UpdateMaximizeIcon();
+            if (e.Property == BoundsProperty && S.Tool == Tool.Library) _side.Width = SideWidth();
+        };
         SelectTab(Tool.Brush);
         UpdateState();
         UpdateZoom();
 
         if (args.Length > 0 && File.Exists(args[0]))
             Opened += (_, _) => Dispatcher.UIThread.Post(() => OpenPath(args[0]), DispatcherPriority.Background);
+        else if (ShowWelcomeSetting)
+            ShowWelcome();
     }
 
     private static WindowIcon? LoadIcon()
@@ -138,20 +165,58 @@ public sealed class MainWindow : Window
         return File.Exists(p) ? new WindowIcon(p) : null;
     }
 
-    // ----------------------------------------------------------------- layout
+    // ------------------------------------------------------------ window chrome
 
-    private Control BuildTopBar()
+    private Control BuildHeader()
     {
-        var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = 72 };
-        bar.Children.Add(new Border { Child = TopAction("메뉴", Icons.Menu, () => ShowMenu("열기")), Margin = new Thickness(8, 0) });
+        // caption strip: icon + title, drag to move, double-click to maximise
+        var caption = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = 32, Background = Brushes.Transparent };
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "openpaint3d.png");
+        var titleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(12, 0, 0, 0) };
+        if (File.Exists(iconPath)) titleRow.Children.Add(new Image { Source = new Bitmap(iconPath), Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center });
+        titleRow.Children.Add(_titleText);
+        caption.Children.Add(titleRow);
+        caption.PointerPressed += (_, e) =>
+        {
+            if (!e.GetCurrentPoint(caption).Properties.IsLeftButtonPressed) return;
+            if (e.ClickCount == 2) ToggleMaximize();
+            else BeginMoveDrag(e);
+        };
+        FlatButton CaptionButton(string icon, string tip, Action a, IBrush? hover = null)
+        {
+            var b = new FlatButton { Width = 46, Height = 32, Hover = hover ?? P3.BarHover, Child = Icons.Make(icon, 10, Brushes.White) }.Init();
+            ToolTip.SetTip(b, tip);
+            b.Click += a;
+            return b;
+        }
+        _maxBtn = CaptionButton(Icons.Maximize, "최대화", ToggleMaximize);
+        _maxIcon = _maxBtn.Child!;
+        var buttons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Children =
+            {
+                CaptionButton(Icons.Minimize, "최소화", () => WindowState = WindowState.Minimized),
+                _maxBtn,
+                CaptionButton(Icons.Close, "닫기", Close, new SolidColorBrush(Color.Parse("#E81123"))),
+            },
+        };
+        Grid.SetColumn(buttons, 2);
+        caption.Children.Add(buttons);
 
-        var tabs = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Spacing = 2 };
+        // tool row
+        var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = 56 };
+        var menu = TopButton("메뉴", Icons.Menu, () => ShowMenu("새로 만들기"));
+        menu.Margin = new Thickness(6, 0, 0, 0);
+        bar.Children.Add(menu);
+
+        var tabs = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         void Tab(Tool t, string label, string icon)
         {
-            var btn = TopAction(label, icon, () => SelectTab(t));
-            var holder = new Border { Child = btn, BorderThickness = new Thickness(0, 0, 0, 3), BorderBrush = Brushes.Transparent };
-            _tabs[t] = holder;
-            tabs.Children.Add(holder);
+            var b = TopButton(label, icon, () => SelectTab(t));
+            b.SelectedBrush = P3.TabSelected;
+            _tabs[t] = b;
+            tabs.Children.Add(b);
         }
         Tab(Tool.Brush, "브러시", Icons.Brushes);
         Tab(Tool.Shape2D, "2D 셰이프", Icons.Shapes2D);
@@ -164,100 +229,177 @@ public sealed class MainWindow : Window
         Grid.SetColumn(tabs, 1);
         bar.Children.Add(tabs);
 
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 0), Children = { _paste, _undo, _history, _redo } };
+        var collapse = new FlatButton { Width = 44, Hover = P3.BarHover, Child = Icons.Make(Icons.ChevronUp, 16, Brushes.White) }.Init();
+        ToolTip.SetTip(collapse, "오른쪽 패널 숨기기/표시");
+        collapse.Click += () =>
+        {
+            _panelHidden = !_panelHidden;
+            collapse.Child = Icons.Make(_panelHidden ? "M5,9 L12,16 L19,9" : Icons.ChevronUp, 16, Brushes.White);
+            ShowPanel();
+        };
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 0), Children = { _paste, _undo, _history, _redo, collapse } };
         Grid.SetColumn(right, 2);
         bar.Children.Add(right);
-        return new Border { Child = bar, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 0, 1), Background = Brushes.White };
+
+        var stack = new StackPanel { Children = { caption, bar } };
+        return new Border { Background = P3.Bar, Child = stack };
     }
 
-    private static Button TopAction(string label, string icon, Action click)
+    private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void UpdateMaximizeIcon()
     {
-        var b = new Button
+        if (_maxBtn == null) return;
+        bool max = WindowState == WindowState.Maximized;
+        _maxBtn.Child = Icons.Make(max ? Icons.Restore : Icons.Maximize, 10, Brushes.White);
+        ToolTip.SetTip(_maxBtn, max ? "이전 크기로 복원" : "최대화");
+    }
+
+    /// <summary>Thin borders along the window edges for resizing (the window has no system frame).</summary>
+    private Control BuildResizeGrips()
+    {
+        var g = new Grid { ColumnDefinitions = new ColumnDefinitions("6,*,6"), RowDefinitions = new RowDefinitions("5,*,6") };
+        void Grip(int col, int row, WindowEdge edge, StandardCursorType cursor)
         {
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(11, 6),
-            CornerRadius = new CornerRadius(4),
-            VerticalAlignment = VerticalAlignment.Stretch,
-            Content = new StackPanel
+            var b = new Border { Background = Brushes.Transparent, Cursor = new Cursor(cursor) };
+            b.PointerPressed += (_, e) =>
             {
-                Spacing = 4,
+                if (WindowState == WindowState.Normal && e.GetCurrentPoint(b).Properties.IsLeftButtonPressed) BeginResizeDrag(edge, e);
+            };
+            Grid.SetColumn(b, col);
+            Grid.SetRow(b, row);
+            g.Children.Add(b);
+        }
+        Grip(0, 0, WindowEdge.NorthWest, StandardCursorType.TopLeftCorner);
+        Grip(1, 0, WindowEdge.North, StandardCursorType.TopSide);
+        Grip(2, 0, WindowEdge.NorthEast, StandardCursorType.TopRightCorner);
+        Grip(0, 1, WindowEdge.West, StandardCursorType.LeftSide);
+        Grip(2, 1, WindowEdge.East, StandardCursorType.RightSide);
+        Grip(0, 2, WindowEdge.SouthWest, StandardCursorType.BottomLeftCorner);
+        Grip(1, 2, WindowEdge.South, StandardCursorType.BottomSide);
+        Grip(2, 2, WindowEdge.SouthEast, StandardCursorType.BottomRightCorner);
+        // the middle cell must not swallow clicks
+        g.IsHitTestVisible = true;
+        return g;
+    }
+
+    private static FlatButton TopButton(string label, string icon, Action click)
+    {
+        var b = new FlatButton
+        {
+            MinWidth = 64,
+            Padding = new Thickness(8, 0),
+            Hover = P3.BarHover,
+            Child = new StackPanel
+            {
+                Spacing = 5,
                 VerticalAlignment = VerticalAlignment.Center,
                 Children =
                 {
-                    Icons.Make(icon, 24),
-                    new TextBlock { Text = label, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Dark },
+                    Icons.Make(icon, 20, Brushes.White),
+                    new TextBlock { Text = label, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Brushes.White },
                 },
             },
-        };
-        b.Classes.Add("top");
-        b.Click += (_, _) => click();
+        }.Init();
+        b.Click += click;
         return b;
     }
 
-    private Control BuildCanvasArea()
+    // --------------------------------------------------------------- sub bar
+
+    private static FlatButton SubButton(string label, string icon, Action click, bool enabled = true, string? tip = null)
     {
-        var area = new Grid { Background = new SolidColorBrush(Color.Parse("#E6E6E6")) };
-        area.Children.Add(_surface);
+        var b = new FlatButton
+        {
+            Padding = new Thickness(14, 0),
+            Hover = P3.PaneHover,
+            SelectedBrush = P3.SubSelected,
+            IsEnabled = enabled,
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 10,
+                VerticalAlignment = VerticalAlignment.Center,
+                Children =
+                {
+                    Icons.Make(icon, 18, P3.Ink),
+                    new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Foreground = Dark },
+                },
+            },
+        }.Init();
+        if (tip != null) ToolTip.SetTip(b, tip);
+        b.Click += click;
+        return b;
+    }
+
+    private static FlatButton IconButton(string icon, string tip, Action click, double width = 40)
+    {
+        var b = new FlatButton { Width = width, Hover = P3.PaneHover, Child = Icons.Make(icon, 18, P3.Ink) }.Init();
+        ToolTip.SetTip(b, tip);
+        b.Click += click;
+        return b;
+    }
+
+    private Control BuildSubBar()
+    {
+        _selectBtn = SubButton("선택", Icons.Select, () => SelectTab(Tool.Select), tip: "3D 개체를 선택해 옮기고 회전합니다");
+        _cropBtn = SubButton("자르기", Icons.Crop, () =>
+        {
+            SelectTab(Tool.Canvas);
+            _surface.BeginCrop();
+            ShowPanel();
+        });
+        var magic = SubButton("매직 선택", Icons.MagicSelect, () => { }, false, "OpenPaint 3D에서는 지원하지 않습니다");
+        var mixed = SubButton("혼합 현실", Icons.MixedReality, () => { }, false, "OpenPaint 3D에서는 지원하지 않습니다");
+        _view3dBtn = SubButton("3D 보기", Icons.Plane3D, () =>
+        {
+            _surface.SetView3D(!S.View3D);
+            ShowPanel();
+        }, tip: "장면 전체를 입체로 돌려 봅니다. 드래그: 회전, 휠: 확대/축소");
 
         _zoomSlider.PropertyChanged += (_, e) =>
         {
             if (e.Property == RangeBase.ValueProperty && !_syncingZoom) _surface.SetZoom(_zoomSlider.Value / 100);
         };
-        Button Small(string text, Action a)
+        var more = IconButton(Icons.More, "자세히", () => { }, 44);
+        var moreMenu = new MenuFlyout { Placement = PlacementMode.BottomEdgeAlignedRight };
+        void MoreItem(string text, Action a)
         {
-            var b = new Button { Content = text, Padding = new Thickness(8, 2), Background = Brushes.Transparent, VerticalAlignment = VerticalAlignment.Center };
-            b.Click += (_, _) => a();
-            return b;
+            var mi = new MenuItem { Header = text };
+            mi.Click += (_, _) => a();
+            moreMenu.Items.Add(mi);
         }
-        _view3d.Content = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            Children = { Icons.Make(Icons.View3D, 18), new TextBlock { Text = "3D 보기", VerticalAlignment = VerticalAlignment.Center } },
-        };
-        _view3d.Padding = new Thickness(10, 3);
-        _view3d.IsCheckedChanged += (_, _) =>
-        {
-            _surface.SetView3D(_view3d.IsChecked == true);
-            _reset3d.IsVisible = _view3d.IsChecked == true;
-            ShowPanel();
-        };
-        ToolTip.SetTip(_view3d, "장면 전체를 입체로 돌려 봅니다. 드래그: 회전, 휠: 확대/축소");
-        _reset3d.Content = "보기 재설정";
-        _reset3d.IsVisible = false;
-        _reset3d.Click += (_, _) => _surface.Reset3DView();
+        MoreItem("화면에 맞추기", () => _surface.FitToView());
+        MoreItem("실제 크기(100%)", () => _surface.SetZoom(1));
+        MoreItem("3D 보기 재설정", () => _surface.Reset3DView());
+        FlyoutBase.SetAttachedFlyout(more, moreMenu);
+        more.Click += () => FlyoutBase.ShowAttachedFlyout(more);
 
-        var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto"), Margin = new Thickness(10, 0) };
-        bar.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center, Children = { _view3d, _reset3d } });
-        _sizeText.Margin = new Thickness(16, 0);
-        Grid.SetColumn(_sizeText, 1);
-        bar.Children.Add(_sizeText);
-        var zoom = new StackPanel
+        var percent = new Border
+        {
+            Width = 64,
+            BorderBrush = Line,
+            BorderThickness = new Thickness(1, 0),
+            Margin = new Thickness(6, 8),
+            Child = _zoomText,
+        };
+        var leftItems = new StackPanel { Orientation = Orientation.Horizontal, Children = { _selectBtn, _cropBtn, magic } };
+        var rightItems = new StackPanel
         {
             Orientation = Orientation.Horizontal,
-            Spacing = 6,
             Children =
             {
-                Small("화면에 맞추기", _surface.FitToView),
-                Small("−", () => _surface.SetZoom(_surface.Zoom / 1.25)),
+                mixed, _view3dBtn,
+                IconButton(Icons.Minus, "축소", () => _surface.SetZoom(_surface.Zoom / 1.25)),
                 _zoomSlider,
-                Small("+", () => _surface.SetZoom(_surface.Zoom * 1.25)),
-                _zoomText,
+                IconButton(Icons.Plus, "확대", () => _surface.SetZoom(_surface.Zoom * 1.25)),
+                percent, more,
             },
         };
-        Grid.SetColumn(zoom, 3);
-        bar.Children.Add(zoom);
-        area.Children.Add(new Border
-        {
-            Height = 42,
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Background = new SolidColorBrush(Color.FromArgb(235, 255, 255, 255)),
-            BorderBrush = Line,
-            BorderThickness = new Thickness(0, 1, 0, 0),
-            Child = bar,
-        });
-        return area;
+        var bar = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = 48, Children = { leftItems } };
+        Grid.SetColumn(rightItems, 2);
+        bar.Children.Add(rightItems);
+        return new Border { Background = P3.Pane, Child = bar, ClipToBounds = true };
     }
 
     // ------------------------------------------------------------------- tabs
@@ -266,121 +408,208 @@ public sealed class MainWindow : Window
     {
         _surface.CommitPending();
         if (S.CropMode) _surface.EndCrop(false);
-        if (S.View3D) _view3d.IsChecked = false;
-        if (t is not (Tool.Shape3D or Tool.Library or Tool.Effects)) _surface.Select(0);
+        if (S.View3D) _surface.SetView3D(false);
+        if (t is not (Tool.Shape3D or Tool.Library or Tool.Effects or Tool.Select)) _surface.Select(0);
+        if (t == Tool.Library && S.Tool != Tool.Library) _beforeLibrary = S.Tool;
+        if (t == Tool.Library) _libraryCategory = null;
         S.Tool = t;
         S.Picking = false;
-        foreach (var (tool, holder) in _tabs)
-        {
-            holder.BorderBrush = tool == t ? Accent : Brushes.Transparent;
-            holder.Background = tool == t ? AccentLight : Brushes.Transparent;
-        }
+        _editColor = false;
+        foreach (var (tool, b) in _tabs) b.IsSelected = tool == t;
         _surface.Redraw();
         ShowPanel();
     }
 
+    private double SideWidth() => S.Tool == Tool.Library && !S.View3D ? Math.Max(470, Bounds.Width * 0.4) : 300;
+
     private void ShowPanel()
     {
         _colorWatchers.Clear();
-        var p = new StackPanel { Margin = new Thickness(16, 12, 16, 24), Spacing = 6 };
+        _selectBtn.IsSelected = S.Tool == Tool.Select;
+        _cropBtn.IsSelected = S.CropMode;
+        _view3dBtn.IsSelected = S.View3D;
+        _side.IsVisible = !_panelHidden;
+        _side.Width = SideWidth();
+        var p = new StackPanel { Margin = new Thickness(18, 14, 18, 24), Spacing = 6 };
         if (S.View3D)
         {
             p.Children.Add(Header("3D 보기"));
-            p.Children.Add(Hint("캔버스와 3D 개체를 입체로 둘러봅니다.\n\n• 드래그: 장면 회전\n• 마우스 휠: 확대/축소\n• '보기 재설정': 처음 각도로\n\n편집하려면 아래쪽 '3D 보기'를 끄세요."));
+            p.Children.Add(Hint("캔버스와 3D 개체를 입체로 둘러봅니다.\n\n• 드래그: 장면 회전\n• 마우스 휠: 확대/축소\n• 자세히(…) > 3D 보기 재설정: 처음 각도로\n\n편집하려면 위쪽의 '3D 보기'를 다시 누르세요."));
             _panel.Content = p;
             return;
         }
-        switch (S.Tool)
-        {
-            case Tool.Brush: BrushPanel(p); break;
-            case Tool.Shape2D: ShapePanel(p); break;
-            case Tool.Shape3D: ModelPanel(p); break;
-            case Tool.Sticker: StickerPanel(p); break;
-            case Tool.Text: TextPanel(p); break;
-            case Tool.Effects: EffectPanel(p); break;
-            case Tool.Canvas: CanvasPanel(p); break;
-            case Tool.Library: LibraryPanel(p); break;
-        }
+        bool objectTools = S.Tool is Tool.Shape3D or Tool.Library or Tool.Select;
+        if (objectTools && _surface.Selected != 0) SelectionPanel(p);
+        else
+            switch (S.Tool)
+            {
+                case Tool.Brush: BrushPanel(p); break;
+                case Tool.Shape2D: ShapePanel(p); break;
+                case Tool.Shape3D: ModelPanel(p); break;
+                case Tool.Sticker: StickerPanel(p); break;
+                case Tool.Text: TextPanel(p); break;
+                case Tool.Effects: EffectPanel(p); break;
+                case Tool.Canvas: CanvasPanel(p); break;
+                case Tool.Library: LibraryPanel(p); break;
+                case Tool.Select: SelectPanel(p); break;
+            }
         _panel.Content = p;
     }
 
-    private static TextBlock Header(string t) => new() { Text = t, FontSize = 22, FontWeight = FontWeight.Light, Margin = new Thickness(0, 0, 0, 6) };
-    private static TextBlock Section(string t) => new() { Text = t, FontSize = 13, FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 14, 0, 2) };
-    private static TextBlock Hint(string t) => new() { Text = t, FontSize = 12, Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
+    // ------------------------------------------------------------ panel parts
 
-    private Control Tile(Control content, string tip, bool selected, Action click, double w = 82, double h = 64)
+    private static TextBlock Header(string t) => new() { Text = t, FontSize = 20, Foreground = P3.Title, Margin = new Thickness(0, 0, 0, 10) };
+    private static TextBlock Section(string t) => new() { Text = t, FontSize = 13, Foreground = Dark, Margin = new Thickness(0, 14, 0, 4) };
+    private static TextBlock Hint(string t) => new() { Text = t, FontSize = 12, Foreground = Muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
+    private static Border Divider() => new() { Height = 1, Background = Line, Margin = new Thickness(0, 12, 0, 4) };
+
+    /// <summary>Square icon tile: plain until hovered, solid blue when selected.</summary>
+    private FlatButton IconTile(Func<bool, Control> content, string tip, bool selected, Action click, double size = 44)
     {
-        var b = new Border
+        var b = new FlatButton
         {
-            Width = w,
-            Height = h,
-            Margin = new Thickness(2),
-            CornerRadius = new CornerRadius(4),
-            Background = selected ? AccentLight : TileBg,
-            BorderBrush = selected ? Accent : Brushes.Transparent,
-            BorderThickness = new Thickness(2),
-            Cursor = new Cursor(StandardCursorType.Hand),
-            Child = content,
-            ClipToBounds = true,
+            Width = size,
+            Height = size,
+            Margin = new Thickness(0, 0, 8, 8),
+            Hover = P3.PaneHover,
+            SelectedBrush = P3.TileSelected,
+            Child = content(selected),
         };
+        b.IsSelected = selected;
+        b.Init();
         ToolTip.SetTip(b, tip);
-        b.PointerPressed += (_, e) =>
+        b.Click += () =>
         {
-            if (!e.GetCurrentPoint(b).Properties.IsLeftButtonPressed) return;
             click();
             ShowPanel();
         };
         return b;
     }
 
-    private static Image Img(IImage src) => new() { Source = src, Stretch = Stretch.None };
-
-    private static Control Labeled(Control visual, string label) => new StackPanel
+    private static Control Center(Control c)
     {
-        VerticalAlignment = VerticalAlignment.Center,
-        Children = { visual, new TextBlock { Text = label, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Muted, TextTrimming = TextTrimming.CharacterEllipsis } },
-    };
+        c.HorizontalAlignment = HorizontalAlignment.Center;
+        c.VerticalAlignment = VerticalAlignment.Center;
+        return c;
+    }
 
-    private static Control SliderRow(string label, double min, double max, double value, Action<double> set, Func<double, string> fmt, Action? done = null)
+    private static Image Img(IImage src, double size) => new() { Source = src, Width = size, Height = size, Stretch = Stretch.Uniform };
+
+    /// <summary>Bordered light box button (full width), Paint 3D panel style.</summary>
+    private static FlatButton BoxButton(Control content, Action click, double height = 40, bool enabled = true, string? tip = null)
     {
-        var val = new TextBlock { Text = fmt(value), HorizontalAlignment = HorizontalAlignment.Right, Foreground = Muted };
-        var head = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 8, 0, 0) };
-        head.Children.Add(new TextBlock { Text = label, FontWeight = FontWeight.SemiBold, FontSize = 13 });
-        Grid.SetColumn(val, 1);
-        head.Children.Add(val);
+        var b = new FlatButton
+        {
+            Height = height,
+            Normal = P3.Box,
+            Hover = P3.PaneHover,
+            BorderBrush = P3.BoxBorder,
+            BorderThickness = new Thickness(1),
+            IsEnabled = enabled,
+            Child = Center(content),
+        }.Init();
+        if (tip != null) ToolTip.SetTip(b, tip);
+        b.Click += click;
+        return b;
+    }
+
+    private static FlatButton WideButton(string text, string? icon, Action click, bool enabled = true)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        if (icon != null) row.Children.Add(Icons.Make(icon, 18, P3.Ink));
+        row.Children.Add(new TextBlock { Text = text, FontSize = 14, VerticalAlignment = VerticalAlignment.Center, Foreground = Dark });
+        return BoxButton(row, click, 42, enabled);
+    }
+
+    /// <summary>Tall button with an icon above its label (3D selection panel).</summary>
+    private static FlatButton TallButton(string text, string icon, Action click, bool enabled = true)
+    {
+        var col = new StackPanel { Spacing = 4, Children = { Center(Icons.Make(icon, 18, P3.Ink)), new TextBlock { Text = text, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Dark } } };
+        return BoxButton(col, click, 64, enabled, enabled ? null : "OpenPaint 3D에서는 지원하지 않습니다");
+    }
+
+    private static FlatButton SquareButton(string icon, string tip, Action click, bool enabled = true)
+    {
+        var b = BoxButton(Icons.Make(icon, 18, P3.Ink), click, 46, enabled, tip);
+        b.Width = 46;
+        b.Margin = new Thickness(0, 0, 8, 0);
+        return b;
+    }
+
+    private static Control Row(params Control[] items)
+    {
+        var g = new UniformGrid { Columns = items.Length };
+        for (int i = 0; i < items.Length; i++)
+        {
+            items[i].Margin = new Thickness(i == 0 ? 0 : 4, 0, i == items.Length - 1 ? 0 : 4, 0);
+            g.Children.Add(items[i]);
+        }
+        return g;
+    }
+
+    private static Control SquareRow(params Control[] items)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        sp.Children.AddRange(items);
+        return sp;
+    }
+
+    /// <summary>Label with an editable value box on the right and a slider underneath.</summary>
+    private static Control ValueRow(string label, double min, double max, double value, Action<double> set, string unit, Action? done = null)
+    {
+        string Fmt(double v) => $"{(int)Math.Round(v)}{unit}";
+        var box = new TextBox
+        {
+            Text = Fmt(value),
+            Width = 84,
+            Height = 32,
+            HorizontalContentAlignment = HorizontalAlignment.Right,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = P3.Box,
+            BorderBrush = P3.BoxBorder,
+        };
+        var head = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 12, 0, 0) };
+        head.Children.Add(new TextBlock { Text = label, FontSize = 13, VerticalAlignment = VerticalAlignment.Center, Foreground = Dark });
+        Grid.SetColumn(box, 1);
+        head.Children.Add(box);
         var s = new Slider { Minimum = min, Maximum = max, Value = value };
         s.PropertyChanged += (_, e) =>
         {
             if (e.Property != RangeBase.ValueProperty) return;
             set(s.Value);
-            val.Text = fmt(s.Value);
+            box.Text = Fmt(s.Value);
         };
+        void FromBox()
+        {
+            var digits = new string((box.Text ?? "").Where(ch => char.IsDigit(ch) || ch == '.').ToArray());
+            if (double.TryParse(digits, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v))
+            {
+                s.Value = Math.Clamp(v, min, max);
+                done?.Invoke();
+            }
+            box.Text = Fmt(s.Value);
+        }
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) FromBox(); };
+        box.LostFocus += (_, _) => FromBox();
         if (done != null) s.AddHandler(PointerReleasedEvent, (_, _) => done(), Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble, true);
         return new StackPanel { Children = { head, s } };
     }
 
     private static ComboBox Combo(string[] items, int selected, Action<int> set)
     {
-        var c = new ComboBox { ItemsSource = items, SelectedIndex = selected, HorizontalAlignment = HorizontalAlignment.Stretch };
+        var c = new ComboBox
+        {
+            ItemsSource = items,
+            SelectedIndex = selected,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Height = 42,
+            Background = P3.Box,
+            BorderBrush = P3.BoxBorder,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
         c.SelectionChanged += (_, _) => { if (c.SelectedIndex >= 0) set(c.SelectedIndex); };
         return c;
-    }
-
-    private static Button Action(string text, Action click, string? icon = null, bool enabled = true)
-    {
-        object content = icon == null
-            ? text
-            : new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { Icons.Make(icon, 16), new TextBlock { Text = text, VerticalAlignment = VerticalAlignment.Center } } };
-        var b = new Button { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center, Margin = new Thickness(2), IsEnabled = enabled };
-        b.Click += (_, _) => click();
-        return b;
-    }
-
-    private static UniformGrid Grid2(params Control[] items)
-    {
-        var g = new UniformGrid { Columns = 2 };
-        foreach (var i in items) g.Children.Add(i);
-        return g;
     }
 
     // ------------------------------------------------------------ colour UI
@@ -410,127 +639,130 @@ public sealed class MainWindow : Window
         }
     }
 
-    private Control FinishRow(string label = "재질")
+    private Control FinishCombo()
     {
-        var sp = new StackPanel();
-        sp.Children.Add(Section(label));
-        sp.Children.Add(Combo(Finishes, S.Finish, SetFinish));
-        return sp;
+        int finish = _surface.Selected != 0 && _engine.Info(_surface.Selected) is { } info ? info.Finish : S.Finish;
+        return Combo(Finishes, finish, SetFinish);
     }
 
-    private Control ColorSection(string title = "색")
+    private void ShowOverlay(Control content)
     {
-        var sp = new StackPanel { Spacing = 6 };
-        sp.Children.Add(Section(title));
+        _overlay.Children.Clear();
+        _overlay.Children.Add(new Border { Background = new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)) });
+        _overlay.Children.Add(content);
+        _overlay.IsVisible = true;
+    }
 
-        var swatch = new Border { Width = 44, Height = 44, CornerRadius = new CornerRadius(22), BorderBrush = Line, BorderThickness = new Thickness(1) };
-        var pick = new ToggleButton { Content = Icons.Make(Icons.Picker, 20), VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(pick, "스포이드: 캔버스에서 색 가져오기");
-        pick.IsCheckedChanged += (_, _) => S.Picking = pick.IsChecked == true;
+    private void HideOverlay()
+    {
+        _overlay.IsVisible = false;
+        _overlay.Children.Clear();
+    }
 
-        var hex = new TextBox { Width = 92, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("monospace") };
-        NumericUpDown Channel() => new() { Minimum = 0, Maximum = 255, Increment = 1, FormatString = "0", Width = 76, ShowButtonSpinner = false };
-        var (r, g, b) = (Channel(), Channel(), Channel());
-        bool syncing = false;
-        void ApplyHex()
+    /// <summary>Open the "새 색 선택" dialog; <paramref name="keep"/> adds the result to the custom colours.</summary>
+    private void PickColor(Color start, Action<Color> ok, bool keep = false)
+    {
+        var dlg = new ColorDialog(start);
+        dlg.Done += c =>
         {
-            if (syncing) return;
-            var t = (hex.Text ?? "").Trim();
-            if (!t.StartsWith('#')) t = "#" + t;
-            if (t.Length == 7 && Color.TryParse(t, out var c)) SetColor(c);
-        }
-        hex.KeyDown += (_, e) => { if (e.Key == Key.Enter) ApplyHex(); };
-        hex.LostFocus += (_, _) => ApplyHex();
-        void ApplyRgb()
-        {
-            if (syncing) return;
-            SetColor(Color.FromRgb((byte)(r.Value ?? 0), (byte)(g.Value ?? 0), (byte)(b.Value ?? 0)));
-        }
-        r.ValueChanged += (_, _) => ApplyRgb();
-        g.ValueChanged += (_, _) => ApplyRgb();
-        b.ValueChanged += (_, _) => ApplyRgb();
+            HideOverlay();
+            if (c is not { } col) return;
+            if (keep)
+            {
+                CustomColors.Remove(col);
+                CustomColors.Insert(0, col);
+                if (CustomColors.Count > 4) CustomColors.RemoveAt(4);
+            }
+            ok(col);
+            ShowPanel();
+        };
+        ShowOverlay(dlg);
+    }
 
-        var top = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Children = { swatch } };
-        var hexRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(10, 0), VerticalAlignment = VerticalAlignment.Center, Children = { new TextBlock { Text = "HEX", VerticalAlignment = VerticalAlignment.Center, Foreground = Muted }, hex } };
-        Grid.SetColumn(hexRow, 1);
-        Grid.SetColumn(pick, 2);
-        top.Children.Add(hexRow);
-        top.Children.Add(pick);
+    /// <summary>Colour swatch button that opens the colour dialog.</summary>
+    private Control SwatchButton(Func<Color> get, Action<Color> set, double width = 46)
+    {
+        var sw = new Border { Background = new SolidColorBrush(get()), BorderBrush = P3.BoxBorder, BorderThickness = new Thickness(1), Margin = new Thickness(6) };
+        var b = new FlatButton { Width = width, Height = 42, Normal = P3.Box, BorderBrush = P3.BoxBorder, BorderThickness = new Thickness(1), Child = sw }.Init();
+        ToolTip.SetTip(b, "색 선택");
+        b.Click += () => PickColor(get(), c => { set(c); sw.Background = new SolidColorBrush(get()); });
+        _colorWatchers.Add(() => sw.Background = new SolidColorBrush(get()));
+        return b;
+    }
+
+    /// <summary>Current colour + eyedropper, 6x3 palette and the "색 추가" row.</summary>
+    private Control ColorBlock()
+    {
+        var sp = new StackPanel { Spacing = 10, Margin = new Thickness(0, 10, 0, 0) };
+        var current = new Border { Height = 42, BorderBrush = P3.BoxBorder, BorderThickness = new Thickness(1), Cursor = new Cursor(StandardCursorType.Hand) };
+        ToolTip.SetTip(current, "색 선택");
+        current.PointerPressed += (_, _) => PickColor(S.Color, c => SetColor(c), true);
+        var picker = new FlatButton
+        {
+            Width = 64,
+            Height = 42,
+            Normal = P3.Box,
+            Hover = P3.PaneHover,
+            SelectedBrush = P3.SubSelected,
+            BorderBrush = P3.BoxBorder,
+            BorderThickness = new Thickness(1),
+            Child = Center(Icons.Make(Icons.Picker, 18, P3.Ink)),
+        }.Init();
+        ToolTip.SetTip(picker, "스포이드: 캔버스에서 색 가져오기");
+        picker.Click += () =>
+        {
+            S.Picking = !S.Picking;
+            picker.IsSelected = S.Picking;
+        };
+        var top = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto"), Children = { current } };
+        Grid.SetColumn(picker, 2);
+        top.Children.Add(picker);
         sp.Children.Add(top);
-        var rgb = new Grid { ColumnDefinitions = new ColumnDefinitions("*,*,*"), Margin = new Thickness(0, 2, 0, 0) };
-        foreach (var (lbl, ctl, col) in new[] { ("R", r, 0), ("G", g, 1), ("B", b, 2) })
-        {
-            var cell = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { new TextBlock { Text = lbl, VerticalAlignment = VerticalAlignment.Center, Foreground = Muted }, ctl } };
-            Grid.SetColumn(cell, col);
-            rgb.Children.Add(cell);
-        }
-        sp.Children.Add(rgb);
 
-        void Sync()
-        {
-            syncing = true;
-            swatch.Background = new SolidColorBrush(S.Color);
-            hex.Text = $"#{S.Color.R:X2}{S.Color.G:X2}{S.Color.B:X2}";
-            r.Value = S.Color.R;
-            g.Value = S.Color.G;
-            b.Value = S.Color.B;
-            pick.IsChecked = S.Picking;
-            syncing = false;
-        }
-        _colorWatchers.Add(Sync);
-        Sync();
-
-        sp.Children.Add(PaletteGrid(c => SetColor(c)));
-        var view = new ColorView { Color = S.Color, IsAlphaEnabled = false, IsAlphaVisible = false, Width = 320 };
-        view.ColorChanged += (_, e) => SetColor(e.NewColor);
-        sp.Children.Add(new Button
-        {
-            Content = "+ 사용자 지정 색",
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            Flyout = new Flyout { Content = view, Placement = PlacementMode.Left },
-        });
-        return sp;
-    }
-
-    private static UniformGrid PaletteGrid(Action<Color> pick)
-    {
-        var grid = new UniformGrid { Columns = 6, Margin = new Thickness(0, 4, 0, 0) };
+        var grid = new UniformGrid { Columns = 6 };
+        var cells = new List<(Border cell, Color c)>();
         foreach (var h in Palette)
         {
             var c = Color.Parse(h);
-            var cell = new Border
-            {
-                Height = 34,
-                Margin = new Thickness(2),
-                CornerRadius = new CornerRadius(3),
-                Background = new SolidColorBrush(c),
-                BorderBrush = new SolidColorBrush(Color.Parse("#D0D0D0")),
-                BorderThickness = new Thickness(1),
-                Cursor = new Cursor(StandardCursorType.Hand),
-            };
+            var cell = new Border { Height = 36, Background = new SolidColorBrush(c), Cursor = new Cursor(StandardCursorType.Hand) };
             ToolTip.SetTip(cell, h);
-            cell.PointerPressed += (_, _) => pick(c);
+            cell.PointerPressed += (_, _) => SetColor(c);
+            cells.Add((cell, c));
             grid.Children.Add(cell);
         }
-        return grid;
-    }
+        sp.Children.Add(grid);
 
-    private Control ColorButton(string label, Func<Color> get, Action<Color> set)
-    {
-        var sw = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(3), Background = new SolidColorBrush(get()), BorderBrush = Line, BorderThickness = new Thickness(1) };
-        var view = new ColorView { Color = get(), IsAlphaEnabled = false, IsAlphaVisible = false, Width = 320 };
-        view.ColorChanged += (_, e) =>
+        var custom = new Grid { ColumnDefinitions = new ColumnDefinitions(string.Join(",", CustomColors.Select(_ => "46").Append("*"))) };
+        for (int i = 0; i < CustomColors.Count; i++)
         {
-            set(Color.FromRgb(e.NewColor.R, e.NewColor.G, e.NewColor.B));
-            sw.Background = new SolidColorBrush(get());
-        };
-        return new Button
+            var c = CustomColors[i];
+            var cell = new Border { Height = 42, Background = new SolidColorBrush(c), Cursor = new Cursor(StandardCursorType.Hand) };
+            cell.PointerPressed += (_, _) => SetColor(c);
+            Grid.SetColumn(cell, i);
+            custom.Children.Add(cell);
+        }
+        var addContent = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Children = { Icons.Make(Icons.Plus, 16, P3.Ink) } };
+        if (CustomColors.Count < 2) addContent.Children.Add(new TextBlock { Text = "색 추가", FontSize = 14, Foreground = Dark, VerticalAlignment = VerticalAlignment.Center });
+        var add = BoxButton(addContent, () => PickColor(S.Color, c => SetColor(c), true), 42);
+        Grid.SetColumn(add, CustomColors.Count);
+        custom.Children.Add(add);
+        sp.Children.Add(custom);
+
+        void Sync()
         {
-            Content = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { sw, new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center } } },
-            Flyout = new Flyout { Content = view, Placement = PlacementMode.Left },
-            Margin = new Thickness(0, 0, 6, 0),
-        };
+            current.Background = new SolidColorBrush(S.Color);
+            picker.IsSelected = S.Picking;
+            foreach (var (cell, c) in cells)
+            {
+                bool on = c == S.Color;
+                cell.BorderBrush = on ? P3.Ink : null;
+                cell.BorderThickness = new Thickness(on ? 2 : 0);
+                cell.Child = on ? new Border { BorderBrush = Brushes.White, BorderThickness = new Thickness(1) } : null;
+            }
+        }
+        _colorWatchers.Add(Sync);
+        Sync();
+        return sp;
     }
 
     // ------------------------------------------------------------ thumbnails
@@ -553,82 +785,61 @@ public sealed class MainWindow : Window
     }
 
     private static IImage ModelThumb(string key, IEnumerable<ModelPart> parts, string color, int finish, int size = 60) =>
-        Thumb("model:" + key, size, size, e =>
+        Thumb("model:" + key + ":" + size, size, size, e =>
         {
             double s = size * 0.78;
             e.AddObject(parts, new Vector3D(size / 2.0, size / 2.0, -s / 2), new Vector3D(s, s, s), 0, Color.Parse(color), finish, Label.None, -12, 28);
         }, true);
 
-    private static IImage BrushThumb(int i) => Thumb("brush:" + i, 70, 34, e =>
-    {
-        var ink = Color.Parse("#2B2B2B");
-        if (i == PaintTools.Eraser)
-        {
-            e.StrokeBegin(0, Color.Parse("#8A8A8A"), 18, 1, 0, new Point(0, 17));
-            e.StrokeTo(new Point(70, 17));
-            e.StrokeEnd();
-        }
-        double size = i switch { PaintTools.Pixel => 3, PaintTools.Pencil => 3, PaintTools.Spray => 14, PaintTools.Eraser => 10, _ => 8 };
-        e.StrokeBegin(i, ink, size, i == 3 ? 0.6 : 1, 0, new Point(8, 22));
-        for (int x = 8; x <= 62; x += 2) e.StrokeTo(new Point(x, 17 + Math.Sin((x - 8) / 54.0 * Math.PI * 2) * 8));
-        e.StrokeEnd();
-    }, true);
-
     // ----------------------------------------------------------------- panels
 
     private void BrushPanel(StackPanel p)
     {
-        p.Children.Add(Header("브러시"));
-        p.Children.Add(new TextBlock { Text = S.Bucket ? "채우기" : BrushNames[S.Brush], FontSize = 15, FontWeight = FontWeight.SemiBold, Foreground = Accent });
-        var grid = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        p.Children.Add(Header(S.Bucket ? "채우기" : BrushNames[S.Brush]));
+        var grid = new WrapPanel { Margin = new Thickness(0, 2, -8, 0) };
         for (int i = 0; i < BrushNames.Length; i++)
         {
             int k = i;
-            grid.Children.Add(Tile(Labeled(Img(BrushThumb(k)), BrushNames[k]), BrushNames[k], !S.Bucket && S.Brush == k,
-                () => { S.Brush = k; S.Bucket = false; S.Picking = false; }, 90, 64));
+            grid.Children.Add(IconTile(sel => Center(ColorIcons.Brush(k, 38, sel)), BrushNames[k], !S.Bucket && S.Brush == k,
+                () => { S.Brush = k; S.Bucket = false; S.Picking = false; }));
         }
-        grid.Children.Add(Tile(Labeled(Icons.Make(Icons.Bucket, 30), "채우기"), "채우기", S.Bucket, () => { S.Bucket = true; S.Picking = false; }, 90, 64));
+        grid.Children.Add(IconTile(sel => Center(ColorIcons.Brush(9, 38, sel)), "채우기", S.Bucket, () => { S.Bucket = true; S.Picking = false; }));
         p.Children.Add(grid);
 
         if (S.Bucket)
-        {
-            p.Children.Add(SliderRow("허용 오차", 0, 255, S.Tolerance, v => S.Tolerance = (int)v, v => $"{(int)v}"));
-        }
+            p.Children.Add(ValueRow("허용 오차", 0, 255, S.Tolerance, v => S.Tolerance = (int)v, ""));
         else
         {
-            if (S.Brush != PaintTools.Eraser) p.Children.Add(FinishRow());
-            p.Children.Add(SliderRow("두께", 1, 200, S.BrushSize, v => S.BrushSize = v, v => $"{(int)v}px"));
+            p.Children.Add(ValueRow("두께", 1, 200, S.BrushSize, v => S.BrushSize = v, "px"));
             if (S.Brush != PaintTools.Eraser)
-                p.Children.Add(SliderRow("불투명도", 1, 100, S.Opacity * 100, v => S.Opacity = v / 100, v => $"{(int)v}%"));
+                p.Children.Add(ValueRow("불투명도", 1, 100, S.Opacity * 100, v => S.Opacity = v / 100, "%"));
         }
-        if (S.Brush != PaintTools.Eraser || S.Bucket) p.Children.Add(ColorSection());
-        else p.Children.Add(Hint("지우개로 지운 부분은 투명해지며, 캔버스 배경 색이 비쳐 보입니다."));
+        if (S.Brush == PaintTools.Eraser && !S.Bucket)
+        {
+            p.Children.Add(Hint("지우개로 지운 부분은 투명해지며, 캔버스 배경 색이 비쳐 보입니다."));
+            return;
+        }
+        if (!S.Bucket) p.Children.Add(FinishCombo());
+        p.Children.Add(ColorBlock());
     }
 
     private void ShapePanel(StackPanel p)
     {
-        p.Children.Add(Header("2D 셰이프"));
-        var pending = _surface.Pending is ShapeItem or CurveItem;
-        if (pending)
+        if (_surface.Pending is ShapeItem or CurveItem)
         {
-            p.Children.Add(Section("편집"));
-            p.Children.Add(Grid2(
-                Action("3D로 만들기", () => _surface.Make3D(), Icons.Make3D),
-                Action("완료", () => _surface.CommitPending()),
-                Action("왼쪽으로 회전", () => _surface.RotatePending(-90), Icons.RotateLeft),
-                Action("오른쪽으로 회전", () => _surface.RotatePending(90), Icons.RotateRight),
-                Action("좌우 대칭", () => _surface.FlipPending(true), Icons.FlipH),
-                Action("상하 대칭", () => _surface.FlipPending(false), Icons.FlipV)));
+            ShapeEditPanel(p);
+            return;
         }
-        p.Children.Add(Section("선 및 곡선"));
-        var lines = new WrapPanel();
+        p.Children.Add(Header("2D 셰이프"));
+        p.Children.Add(Section("선과 곡선"));
+        var lines = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
         for (int i = 0; i < Shapes2D.LineNames.Length; i++)
         {
             int k = i, n = k == 0 ? 2 : k + 2;
-            var view = new GeometryView
+            lines.Children.Add(IconTile(sel => new GeometryView
             {
-                Width = 52,
-                Height = 46,
+                Inset = 10,
+                Ink = sel ? Brushes.White : P3.Ink,
                 Build = r =>
                 {
                     var pts = Enumerable.Range(0, n).Select(j =>
@@ -639,156 +850,219 @@ public sealed class MainWindow : Window
                     }).ToList();
                     return Shapes2D.Curve(pts);
                 },
-            };
-            lines.Children.Add(Tile(view, Shapes2D.LineNames[k], S.Line == k, () => S.Line = k, 64, 50));
+            }, Shapes2D.LineNames[k], S.Line == k, () => S.Line = k));
         }
         p.Children.Add(lines);
-        p.Children.Add(Section("셰이프"));
-        var grid = new WrapPanel();
+        p.Children.Add(Section("2D 셰이프"));
+        var grid = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
         for (int i = 0; i < Shapes2D.Names.Length; i++)
         {
             int k = i;
-            grid.Children.Add(Tile(new GeometryView { Width = 46, Height = 42, Build = r => Shapes2D.Build(k, r), Filled = true },
-                Shapes2D.Names[k], S.Line < 0 && S.Shape == k, () => { S.Shape = k; S.Line = -1; }, 52, 46));
+            grid.Children.Add(IconTile(sel => new GeometryView { Inset = 12, Ink = sel ? Brushes.White : P3.Ink, Build = r => Shapes2D.Build(k, r) },
+                Shapes2D.Names[k], S.Line < 0 && S.Shape == k, () => { S.Shape = k; S.Line = -1; }));
         }
         p.Children.Add(grid);
-        p.Children.Add(Hint("캔버스에서 드래그해 그린 뒤 손잡이로 크기·회전을 조정하세요. 곡선은 점을 끌어 모양을 바꿉니다. 다른 곳을 클릭하거나 Enter를 누르면 확정됩니다."));
+    }
 
-        p.Children.Add(Section("채우기"));
-        p.Children.Add(Combo(new[] { "없음", "단색", "그라데이션" }, S.FillMode, v => { S.FillMode = v; _surface.SyncPending(); ShowPanel(); }));
-        if (S.FillMode > 0)
+    private void ShapeEditPanel(StackPanel p)
+    {
+        var shape = _surface.Pending as ShapeItem;
+        p.Children.Add(Header(shape != null ? Shapes2D.Names[shape.Kind] : Shapes2D.LineNames[Math.Max(0, S.Line)]));
+        if (shape != null)
         {
-            var row = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
-            row.Children.Add(ColorButton(S.FillMode == 2 ? "시작 색" : "채우기 색", () => S.FillColor, c => { S.FillColor = c; _surface.SyncPending(); }));
-            if (S.FillMode == 2) row.Children.Add(ColorButton("끝 색", () => S.FillColor2, c => { S.FillColor2 = c; _surface.SyncPending(); }));
-            p.Children.Add(row);
+            p.Children.Add(Section("채우기"));
+            var fill = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,8,*") };
+            fill.Children.Add(SwatchButton(() => S.FillColor, c => { S.FillColor = c; if (S.FillMode == 0) S.FillMode = 1; _surface.SyncPending(); }));
+            var mode = Combo(new[] { "없음", "단색", "그라데이션" }, S.FillMode, v => { S.FillMode = v; _surface.SyncPending(); ShowPanel(); });
+            mode.Margin = new Thickness(0);
+            Grid.SetColumn(mode, 2);
+            fill.Children.Add(mode);
+            p.Children.Add(fill);
+            if (S.FillMode == 2)
+            {
+                var end = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,8,*"), Margin = new Thickness(0, 6, 0, 0) };
+                end.Children.Add(SwatchButton(() => S.FillColor2, c => { S.FillColor2 = c; _surface.SyncPending(); }));
+                var lbl = new TextBlock { Text = "그라데이션 끝 색", VerticalAlignment = VerticalAlignment.Center, Foreground = Muted };
+                Grid.SetColumn(lbl, 2);
+                end.Children.Add(lbl);
+                p.Children.Add(end);
+            }
         }
         p.Children.Add(Section("선 종류"));
-        p.Children.Add(Combo(new[] { "실선", "파선", "점선", "없음" }, S.LineType, v => { S.LineType = v; _surface.SyncPending(); }));
-        p.Children.Add(SliderRow("두께", 0, 60, S.ShapeThickness, v => { S.ShapeThickness = v; _surface.SyncPending(); }, v => $"{(int)v}px"));
-        p.Children.Add(SliderRow("불투명도", 1, 100, S.ShapeOpacity * 100, v => { S.ShapeOpacity = v / 100; _surface.SyncPending(); }, v => $"{(int)v}%"));
-        p.Children.Add(FinishRow());
-        p.Children.Add(ColorSection("선 색"));
+        var line = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,8,*") };
+        line.Children.Add(SwatchButton(() => S.Color, c => SetColor(c)));
+        var type = Combo(new[] { "실선", "파선", "점선", "없음" }, S.LineType, v => { S.LineType = v; _surface.SyncPending(); });
+        type.Margin = new Thickness(0);
+        Grid.SetColumn(type, 2);
+        line.Children.Add(type);
+        p.Children.Add(line);
+        p.Children.Add(ValueRow("두께", 0, 60, S.ShapeThickness, v => { S.ShapeThickness = v; _surface.SyncPending(); }, "px"));
+        p.Children.Add(ValueRow("불투명도", 1, 100, S.ShapeOpacity * 100, v => { S.ShapeOpacity = v / 100; _surface.SyncPending(); }, "%"));
+        p.Children.Add(FinishCombo());
+        var make = BoxButton(new StackPanel
+        {
+            Spacing = 4,
+            Children = { Center(ColorIcons.Make(30, ("M5,8 L12,4 L19,8 L12,12 Z", "#7FB2F5"), ("M5,8 V16 L12,20 V12 Z", "#4F8DF0"), ("M19,8 V16 L12,20 V12 Z", "#3466C9"))), new TextBlock { Text = "3D로 만들기", FontSize = 13, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Dark } },
+        }, () => _surface.Make3D(), 70);
+        make.Margin = new Thickness(0, 14, 0, 0);
+        p.Children.Add(make);
+        p.Children.Add(Section("회전 및 대칭"));
+        p.Children.Add(SquareRow(
+            SquareButton(Icons.RotateLeft, "왼쪽으로 회전", () => _surface.RotatePending(-90)),
+            SquareButton(Icons.RotateRight, "오른쪽으로 회전", () => _surface.RotatePending(90)),
+            SquareButton(Icons.FlipH, "좌우 대칭", () => _surface.FlipPending(true)),
+            SquareButton(Icons.FlipV, "상하 대칭", () => _surface.FlipPending(false))));
     }
+
+    private static readonly (string tip, (string, string?)[] layers)[] Doodles =
+    {
+        ("날카로운 가장자리", new (string, string?)[] { ("M3,15 L7,6 L14,4 L19,9 L16,17 L8,18 Z", "#5B8DEF"), ("M15,21 L21,15 L22.5,16.5 L16.5,22.5 Z", "#F6C443") }),
+        ("부드러운 가장자리", new (string, string?)[] { ("M3,12 C3,6 8,3.5 12,4.5 C17,4.5 20,8 19,12 C18.5,16.5 14,18.5 10,18 C6,17.5 3,15.5 3,12 Z", "#5B8DEF"), ("M7,9.5 C8,7.5 10,6.8 12,7", null), ("M15,21 L21,15 L22.5,16.5 L16.5,22.5 Z", "#F6C443") }),
+        ("튜브", new (string, string?)[] { ("M2.5,17 C2.5,9 8.5,12 10.5,7.5 C12.5,3 17.5,3.5 20,4.5 L19,7.5 C16.8,6.6 14.6,6.8 13.6,9.6 C11,15.5 5.6,12.4 5.6,17 Z", "#5B8DEF"), ("M15,21 L21,15 L22.5,16.5 L16.5,22.5 Z", "#F6C443") }),
+    };
 
     private void ModelPanel(StackPanel p)
     {
-        p.Children.Add(Header("3D 셰이프"));
+        p.Children.Add(WideButton("3D 라이브러리 열기", Icons.Library, () => SelectTab(Tool.Library)));
+        p.Children.Add(Section("3D 낙서"));
+        var doodles = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
+        for (int i = 0; i < Doodles.Length; i++)
+        {
+            int k = i;
+            doodles.Children.Add(IconTile(_ => Center(ColorIcons.Make(30, Doodles[k].layers)), Doodles[k].tip, S.Doodle == k, () => { S.Doodle = k; S.Model = null; }));
+        }
+        p.Children.Add(doodles);
         p.Children.Add(Section("3D 개체"));
-        var basics = new WrapPanel();
+        var basics = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
         for (int i = 0; i < Library.BasicNames.Length; i++)
         {
             int k = i;
-            var thumb = ModelThumb("basic" + k, new[] { new ModelPart(Library.BasicPrims[k], 0, 0, 0, 1, 1, 1) }, "#4F8EF7", 1);
-            basics.Children.Add(Tile(Labeled(Img(thumb), Library.BasicNames[k]), Library.BasicNames[k],
-                S.Model == null && S.Doodle < 0 && S.Basic == k, () => { S.Basic = k; S.Model = null; S.Doodle = -1; }, 90, 84));
+            var thumb = ModelThumb("basic" + k, new[] { new ModelPart(Library.BasicPrims[k], 0, 0, 0, 1, 1, 1) }, "#4F8EF7", 1, 64);
+            basics.Children.Add(IconTile(_ => Center(Img(thumb, 34)), Library.BasicNames[k],
+                S.Model == null && S.Doodle < 0 && S.Basic == k, () => { S.Basic = k; S.Model = null; S.Doodle = -1; }));
         }
         p.Children.Add(basics);
         p.Children.Add(Section("3D 모델"));
-        var people = new WrapPanel();
+        var people = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
         foreach (var m in Library.People)
         {
             var model = m;
-            people.Children.Add(Tile(Labeled(Img(ModelThumb(m.Name, m.Parts, m.Color, m.Finish)), m.Name), m.Name,
-                S.Model == model, () => { S.Model = model; S.Doodle = -1; S.Color = Color.Parse(model.Color); S.Finish = model.Finish; }, 90, 84));
+            var thumb = ModelThumb(m.Name, m.Parts, m.Color, m.Finish, 64);
+            people.Children.Add(IconTile(_ => Center(Img(thumb, 36)), m.Name, S.Model == model,
+                () => { S.Model = model; S.Doodle = -1; S.Color = Color.Parse(model.Color); S.Finish = model.Finish; }));
         }
         p.Children.Add(people);
-        p.Children.Add(Section("3D 낙서"));
-        var doodles = new WrapPanel();
-        string[] dn = { "날카로운 가장자리", "부드러운 가장자리" };
-        for (int i = 0; i < 2; i++)
-        {
-            int k = i;
-            var thumb = Thumb("doodle" + k, 60, 60, e =>
-            {
-                var mask = new byte[40 * 40];
-                for (int y = 0; y < 40; y++)
-                    for (int x = 0; x < 40; x++)
-                    {
-                        double dx = x - 20, dy = y - 20, ang = Math.Atan2(dy, dx), rr = 15 + 4 * Math.Sin(ang * 3);
-                        mask[y * 40 + x] = Math.Sqrt(dx * dx + dy * dy) < rr ? (byte)255 : (byte)0;
-                    }
-                e.AddMaskObject(mask, 40, 40, k == 1, new Vector3D(30, 30, -12), new Vector3D(52, 52, k == 1 ? 26 : 14), 0, Color.Parse("#FF7043"), 1, Label.None);
-            }, true);
-            doodles.Children.Add(Tile(Labeled(Img(thumb), dn[k]), dn[k], S.Doodle == k, () => { S.Doodle = k; S.Model = null; }, 136, 84));
-        }
-        p.Children.Add(doodles);
-        p.Children.Add(Hint(S.Doodle >= 0
-            ? "캔버스에 윤곽을 그리면 입체 개체가 만들어집니다."
-            : "캔버스에서 드래그(또는 클릭)해 3D 개체를 놓습니다. 개체를 클릭하면 선택되고, 손잡이로 회전(X·Y·Z축)·크기·깊이를 조정할 수 있습니다."));
-        SelectedObjectSection(p);
-        p.Children.Add(FinishRow());
-        p.Children.Add(ColorSection());
+        p.Children.Add(FinishCombo());
+        p.Children.Add(ColorBlock());
     }
 
-    private void SelectedObjectSection(StackPanel p)
+    private void SelectPanel(StackPanel p)
     {
-        if (_surface.Selected == 0) return;
-        p.Children.Add(Section("선택한 3D 개체"));
-        p.Children.Add(Hint("아래 색과 재질을 바꾸면 선택한 개체에 바로 적용됩니다. Delete 키로 삭제할 수 있습니다."));
-        p.Children.Add(Grid2(
-            Action("복제", () => { var id = _engine.DuplicateObject(_surface.Selected); _surface.Refresh(); _surface.Select(id); }, Icons.Copy),
-            Action("삭제", () => _surface.DeleteSelection(), Icons.Trash)));
+        p.Children.Add(Header("선택"));
+        p.Children.Add(Hint("3D 개체를 클릭하면 선택됩니다. 선택한 개체는 끌어서 옮기고, 둘레의 손잡이로 회전·크기·깊이를 조정할 수 있습니다."));
+    }
+
+    private void SelectionPanel(StackPanel p)
+    {
+        uint id = _surface.Selected;
+        p.Children.Add(Header("3D 선택"));
+        var edit = WideButton("색 편집", Icons.Palette, () => { _editColor = !_editColor; ShowPanel(); });
+        edit.IsSelected = _editColor;
+        edit.SelectedBrush = P3.SubSelected;
+        p.Children.Add(edit);
+        if (_editColor)
+        {
+            if (_engine.Info(id) is { } info) S.Color = info.Color;
+            p.Children.Add(FinishCombo());
+            p.Children.Add(ColorBlock());
+        }
+        p.Children.Add(Section("선택"));
+        p.Children.Add(Row(TallButton("모두 선택", Icons.SelectAll, () => { }, false), TallButton("다중 선택", Icons.MultiSelect, () => { }, false)));
+        p.Children.Add(Section("그룹화"));
+        p.Children.Add(Row(TallButton("그룹", Icons.Group, () => { }, false), TallButton("그룹 해제", Icons.Ungroup, () => { }, false)));
+        p.Children.Add(Section("편집"));
+        p.Children.Add(SquareRow(
+            SquareButton(Icons.Cut, "잘라내기(지원하지 않음)", () => { }, false),
+            SquareButton(Icons.Copy, "복사", () => { _clipObject = id; ShowPanel(); }),
+            SquareButton(Icons.Paste, "붙여넣기", PasteObject, _clipObject != 0 && _engine.Info(_clipObject) != null),
+            SquareButton(Icons.Trash, "삭제", () => _surface.DeleteSelection())));
+        p.Children.Add(Section("회전 및 대칭"));
+        void Turn(int axis, double deg, Label label)
+        {
+            _engine.Checkpoint(label);
+            _engine.RotateObject(id, axis, deg);
+            _surface.Refresh();
+        }
+        p.Children.Add(SquareRow(
+            SquareButton(Icons.RotateLeft, "왼쪽으로 회전", () => Turn(2, -90, Label.Rotate)),
+            SquareButton(Icons.RotateRight, "오른쪽으로 회전", () => Turn(2, 90, Label.Rotate)),
+            SquareButton(Icons.FlipH, "좌우 대칭", () => Turn(1, 180, Label.Flip)),
+            SquareButton(Icons.FlipV, "상하 대칭", () => Turn(0, 180, Label.Flip))));
+    }
+
+    private void PasteObject()
+    {
+        if (_clipObject == 0 || _engine.Info(_clipObject) == null) return;
+        var id = _engine.DuplicateObject(_clipObject);
+        _surface.Refresh();
+        _surface.Select(id);
     }
 
     private void StickerPanel(StackPanel p)
     {
         p.Children.Add(Header("스티커"));
-        if (_surface.Pending is ImageItem)
-        {
-            p.Children.Add(Section("편집"));
-            p.Children.Add(Grid2(
-                Action("완료", () => _surface.CommitPending()),
-                Action("취소", () => _surface.CancelPending()),
-                Action("좌우 대칭", () => _surface.FlipPending(true), Icons.FlipH),
-                Action("상하 대칭", () => _surface.FlipPending(false), Icons.FlipV)));
-        }
-        var tabs = new UniformGrid { Columns = 3 };
-        string[] names = { "기본", "질감", "사용자 지정" };
+        var tabs = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
+        string[] names = { "스티커", "질감", "사용자 지정 스티커" };
+        string[] icons = { Icons.StickerTab, Icons.TextureTab, Icons.CustomTab };
         for (int i = 0; i < 3; i++)
         {
             int k = i;
-            var b = new ToggleButton { Content = names[i], IsChecked = _stickerTab == k, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center, Margin = new Thickness(2) };
-            b.Click += (_, _) => { _stickerTab = k; ShowPanel(); };
-            tabs.Children.Add(b);
+            tabs.Children.Add(IconTile(sel => Center(Icons.Make(icons[k], 24, sel ? Brushes.White : P3.Ink)), names[k], _stickerTab == k, () => _stickerTab = k));
         }
         p.Children.Add(tabs);
-        var grid = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        p.Children.Add(new Border { Height = 1, Background = Line, Margin = new Thickness(0, 4, 0, 12) });
+        var grid = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
         switch (_stickerTab)
         {
             case 0:
                 for (int i = 0; i < Stickers.Names.Length; i++)
                 {
                     int k = i;
-                    grid.Children.Add(Tile(new StickerView { Kind = k }, Stickers.Names[k], S.Texture < 0 && S.Custom == null && S.Sticker == k,
-                        () => { S.Sticker = k; S.Texture = -1; S.Custom = null; }, 66, 66));
+                    grid.Children.Add(IconTile(_ => new StickerView { Kind = k, Margin = new Thickness(5) }, Stickers.Names[k],
+                        S.Texture < 0 && S.Custom == null && S.Sticker == k, () => { S.Sticker = k; S.Texture = -1; S.Custom = null; }, 52));
                 }
                 break;
             case 1:
                 for (int i = 0; i < Textures.Names.Length; i++)
                 {
                     int k = i;
-                    var img = new Image { Source = Textures.Get(k), Stretch = Stretch.UniformToFill, Width = 60, Height = 44 };
-                    grid.Children.Add(Tile(Labeled(img, Textures.Names[k]), Textures.Names[k], S.Texture == k,
-                        () => { S.Texture = k; S.Custom = null; }, 90, 70));
+                    grid.Children.Add(IconTile(_ => new Image { Source = Textures.Get(k), Stretch = Stretch.UniformToFill, Margin = new Thickness(5) }, Textures.Names[k],
+                        S.Texture == k, () => { S.Texture = k; S.Custom = null; }, 52));
                 }
                 break;
             default:
                 foreach (var f in CustomStickers())
                 {
-                    var path = f;
-                    IImage? img = null;
-                    try { img = new Bitmap(path); } catch { continue; }
+                    IImage? img;
+                    try { img = new Bitmap(f); } catch { continue; }
                     var bitmap = img;
-                    grid.Children.Add(Tile(new Image { Source = bitmap, Stretch = Stretch.Uniform, Margin = new Thickness(4) }, Path.GetFileName(path),
-                        S.Custom != null && ReferenceEquals(S.Custom, bitmap), () => { S.Custom = bitmap; S.Texture = -1; }, 66, 66));
+                    grid.Children.Add(IconTile(_ => new Image { Source = bitmap, Stretch = Stretch.Uniform, Margin = new Thickness(5) }, Path.GetFileName(f),
+                        S.Custom != null && ReferenceEquals(S.Custom, bitmap), () => { S.Custom = bitmap; S.Texture = -1; }, 52));
                 }
-                grid.Children.Add(Tile(Labeled(Icons.Make(Icons.Insert, 26), "스티커 추가"), "이미지 파일로 스티커 만들기", false, () => _ = AddCustomSticker(), 90, 66));
                 break;
         }
         p.Children.Add(grid);
-        p.Children.Add(SliderRow("불투명도", 1, 100, S.StickerOpacity * 100, v => { S.StickerOpacity = v / 100; _surface.SyncPending(); }, v => $"{(int)v}%"));
-        p.Children.Add(Hint("캔버스에서 드래그(또는 클릭)해 붙인 뒤 손잡이로 크기·회전을 조정하세요. 다른 곳을 클릭하면 확정됩니다.\n3D 개체 표면에 찍는 기능은 지원하지 않습니다."));
+        if (_stickerTab == 2) p.Children.Add(WideButton("스티커 추가", Icons.Plus, () => _ = AddCustomSticker()));
+        p.Children.Add(ValueRow("불투명도", 1, 100, S.StickerOpacity * 100, v => { S.StickerOpacity = v / 100; _surface.SyncPending(); }, "%"));
+        if (_surface.Pending is ImageItem)
+        {
+            p.Children.Add(Section("회전 및 대칭"));
+            p.Children.Add(SquareRow(
+                SquareButton(Icons.RotateLeft, "왼쪽으로 회전", () => _surface.RotatePending(-90)),
+                SquareButton(Icons.RotateRight, "오른쪽으로 회전", () => _surface.RotatePending(90)),
+                SquareButton(Icons.FlipH, "좌우 대칭", () => _surface.FlipPending(true)),
+                SquareButton(Icons.FlipV, "상하 대칭", () => _surface.FlipPending(false))));
+        }
     }
 
     private static IEnumerable<string> CustomStickers()
@@ -823,112 +1097,167 @@ public sealed class MainWindow : Window
         }
     }
 
+    private static readonly int[] FontSizes = { 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72, 96, 120, 160, 200, 300 };
+
     private void TextPanel(StackPanel p)
     {
         p.Children.Add(Header("텍스트"));
-        var kinds = new WrapPanel();
-        kinds.Children.Add(Tile(Labeled(new TextBlock { Text = "가", FontSize = 26, HorizontalAlignment = HorizontalAlignment.Center }, "2D 텍스트"), "2D 텍스트", !S.Text3D,
-            () => { S.Text3D = false; _surface.SyncPending(); }, 136, 70));
-        kinds.Children.Add(Tile(Labeled(Img(Thumb("text3d", 60, 40, e =>
-        {
-            var mask = new byte[48 * 30];
-            for (int y = 0; y < 30; y++)
-                for (int x = 0; x < 48; x++)
-                    mask[y * 48 + x] = (x is > 6 and < 42 && y is > 4 and < 10) || (x is > 20 and < 28 && y is > 4 and < 27) ? (byte)255 : (byte)0;
-            e.AddMaskObject(mask, 48, 30, false, new Vector3D(30, 20, -6), new Vector3D(50, 32, 10), 0, Color.Parse("#E53935"), 1, Label.None);
-        }, true)), "3D 텍스트"), "3D 텍스트", S.Text3D, () => { S.Text3D = true; _surface.SyncPending(); }, 136, 70));
+        var kinds = new WrapPanel { Margin = new Thickness(0, 0, -8, 0) };
+        kinds.Children.Add(IconTile(sel => Center(Icons.Make(Icons.Text2D, 24, sel ? Brushes.White : P3.Ink)), "2D 텍스트", !S.Text3D,
+            () => { S.Text3D = false; _surface.SyncPending(); }));
+        kinds.Children.Add(IconTile(sel => Center(Icons.Make(Icons.Text3D, 24, sel ? Brushes.White : P3.Ink)), "3D 텍스트", S.Text3D,
+            () => { S.Text3D = true; _surface.SyncPending(); }));
         p.Children.Add(kinds);
-        p.Children.Add(Hint("캔버스에서 드래그해 텍스트 상자를 만들고 바로 입력하세요. 상자 밖을 클릭하면 확정됩니다."));
+        p.Children.Add(Divider());
 
-        p.Children.Add(Section("글꼴"));
-        var fonts = new ComboBox { ItemsSource = _fonts, SelectedItem = S.Font, HorizontalAlignment = HorizontalAlignment.Stretch, MaxDropDownHeight = 400 };
+        var fonts = new ComboBox { ItemsSource = _fonts, SelectedItem = S.Font, HorizontalAlignment = HorizontalAlignment.Stretch, MaxDropDownHeight = 400, Height = 42, Background = P3.Box, BorderBrush = P3.BoxBorder, Margin = new Thickness(0, 8, 0, 0) };
         fonts.SelectionChanged += (_, _) => { S.Font = fonts.SelectedItem as string ?? ""; _surface.SyncPending(); };
         p.Children.Add(fonts);
-        p.Children.Add(SliderRow("크기", 8, 300, S.FontSize, v => { S.FontSize = v; _surface.SyncPending(); }, v => $"{(int)v}pt"));
+        var sizes = FontSizes.Select(s => s.ToString()).ToArray();
+        int nearest = Array.IndexOf(FontSizes, FontSizes.OrderBy(s => Math.Abs(s - S.FontSize)).First());
+        var sizeRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto") };
+        sizeRow.Children.Add(Combo(sizes, nearest, i => { S.FontSize = FontSizes[i]; _surface.SyncPending(); }));
+        var sw = SwatchButton(() => S.Color, c => SetColor(c), 64);
+        sw.Margin = new Thickness(0, 8, 0, 0);
+        Grid.SetColumn(sw, 2);
+        sizeRow.Children.Add(sw);
+        p.Children.Add(sizeRow);
 
-        ToggleButton Toggle(Control content, bool on, string tip, Action<bool> set)
+        FlatButton Toggle(Control content, bool on, string tip, Action<bool> set)
         {
-            var t = new ToggleButton { Content = content, IsChecked = on, Width = 40 };
-            ToolTip.SetTip(t, tip);
-            t.IsCheckedChanged += (_, _) => { set(t.IsChecked == true); _surface.SyncPending(); };
-            return t;
+            var b = new FlatButton
+            {
+                Width = 38,
+                Height = 40,
+                Normal = P3.Box,
+                Hover = P3.PaneHover,
+                SelectedBrush = P3.SubSelected,
+                BorderBrush = P3.BoxBorder,
+                BorderThickness = new Thickness(1),
+                Margin = new Thickness(0, 0, 3, 0),
+                Child = Center(content),
+            };
+            b.IsSelected = on;
+            b.Init();
+            ToolTip.SetTip(b, tip);
+            b.Click += () =>
+            {
+                b.IsSelected = !b.IsSelected;
+                set(b.IsSelected);
+                _surface.SyncPending();
+            };
+            return b;
         }
-        var style = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Margin = new Thickness(0, 8, 0, 0) };
-        style.Children.Add(Toggle(new TextBlock { Text = "가", FontWeight = FontWeight.Bold }, S.Bold, "굵게", v => S.Bold = v));
-        style.Children.Add(Toggle(new TextBlock { Text = "가", FontStyle = FontStyle.Italic }, S.Italic, "기울임꼴", v => S.Italic = v));
-        style.Children.Add(Toggle(new TextBlock { Text = "가", TextDecorations = TextDecorations.Underline }, S.Underline, "밑줄", v => S.Underline = v));
-        style.Children.Add(new Border { Width = 12 });
+        var style = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
+        style.Children.Add(Toggle(new TextBlock { Text = "B", FontWeight = FontWeight.Bold, FontSize = 15 }, S.Bold, "굵게", v => S.Bold = v));
+        style.Children.Add(Toggle(new TextBlock { Text = "I", FontStyle = FontStyle.Italic, FontSize = 15 }, S.Italic, "기울임꼴", v => S.Italic = v));
+        style.Children.Add(Toggle(new TextBlock { Text = "U", TextDecorations = TextDecorations.Underline, FontSize = 15 }, S.Underline, "밑줄", v => S.Underline = v));
+        style.Children.Add(new Border { Width = 8 });
         var aligns = new[] { (TextAlignment.Left, "M4,6 H20 M4,10 H14 M4,14 H20 M4,18 H14", "왼쪽 맞춤"), (TextAlignment.Center, "M4,6 H20 M7,10 H17 M4,14 H20 M7,18 H17", "가운데 맞춤"), (TextAlignment.Right, "M4,6 H20 M10,10 H20 M4,14 H20 M10,18 H20", "오른쪽 맞춤") };
         foreach (var (al, icon, tip) in aligns)
         {
             var a = al;
-            var t = new ToggleButton { Content = Icons.Make(icon, 16), IsChecked = S.Align == a, Width = 40 };
-            ToolTip.SetTip(t, tip);
-            t.Click += (_, _) => { S.Align = a; _surface.SyncPending(); ShowPanel(); };
-            style.Children.Add(t);
+            style.Children.Add(Toggle(Icons.Make(icon, 16, P3.Ink), S.Align == a, tip, _ => { S.Align = a; ShowPanel(); }));
         }
         p.Children.Add(style);
-        if (S.Text3D) p.Children.Add(FinishRow());
-        p.Children.Add(ColorSection("글자 색"));
+        if (S.Text3D) p.Children.Add(FinishCombo());
+        p.Children.Add(ColorBlock());
     }
 
     private void EffectPanel(StackPanel p)
     {
         var v = _engine.View;
         p.Children.Add(Header("효과"));
-        p.Children.Add(Section("필터"));
-        var grid = new WrapPanel();
+        var current = Presets.FirstOrDefault(pr => Engine.Pack(Color.Parse(pr.Light)) == v.LightColor && pr.Filter == v.Filter && Math.Abs(pr.Brightness - v.Brightness) < 0.01);
+        p.Children.Add(new TextBlock
+        {
+            Margin = new Thickness(0, 0, 0, 10),
+            Inlines = new Avalonia.Controls.Documents.InlineCollection
+            {
+                new Avalonia.Controls.Documents.Run("필터 :  ") { Foreground = Dark },
+                new Avalonia.Controls.Documents.Run(current?.Name ?? "사용자 지정") { FontWeight = FontWeight.SemiBold, Foreground = Dark },
+            },
+        });
+        var grid = new WrapPanel { Margin = new Thickness(0, 0, -6, 0) };
         foreach (var preset in Presets)
         {
             var pr = preset;
-            var thumb = Thumb("fx:" + pr.Name, 82, 46, e =>
+            bool on = pr == current;
+            var circle = new Ellipse
             {
-                e.StrokeBegin(0, Color.Parse("#BFE3FF"), 200, 1, 0, new Point(0, 10));
-                e.StrokeTo(new Point(82, 10));
-                e.StrokeEnd();
-                e.StrokeBegin(0, Color.Parse("#8BC34A"), 30, 1, 0, new Point(0, 46));
-                e.StrokeTo(new Point(82, 46));
-                e.StrokeEnd();
-                var sph = new[] { new ModelPart(Library.Sphere, 0, 0, 0, 1, 1, 1) };
-                var cube = new[] { new ModelPart(Library.Cube, 0, 0, 0, 1, 1, 1) };
-                e.AddObject(sph, new Vector3D(24, 22, -14), new Vector3D(28, 28, 28), 0, Color.Parse("#FF8A3D"), 1, Label.None);
-                e.AddObject(cube, new Vector3D(58, 24, -14), new Vector3D(24, 24, 24), 0, Color.Parse("#3D7BFF"), 0, Label.None, 20, 30);
-                e.SetView(ToView(pr, e.View));
-            });
-            bool on = Engine.Pack(Color.Parse(pr.Light)) == v.LightColor && pr.Filter == v.Filter && Math.Abs(pr.Brightness - v.Brightness) < 0.01;
-            grid.Children.Add(Tile(Labeled(Img(thumb), pr.Name), pr.Name, on, () =>
+                Width = 32,
+                Height = 32,
+                Fill = new LinearGradientBrush
+                {
+                    StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                    EndPoint = new RelativePoint(1, 1, RelativeUnit.Relative),
+                    GradientStops = { new GradientStop(Color.Parse(pr.Swatch), 0), new GradientStop(Blend(Color.Parse(pr.Swatch), Colors.Black, 0.12), 1) },
+                },
+                Stroke = on ? P3.TileSelected : P3.Ink,
+                StrokeThickness = on ? 3 : 1.2,
+            };
+            var b = new FlatButton { Width = 42, Height = 42, CornerRadius = new CornerRadius(21), Margin = new Thickness(0, 0, 6, 6), Child = Center(circle) }.Init();
+            ToolTip.SetTip(b, pr.Name);
+            b.Click += () =>
             {
                 _engine.SetView(ToView(pr, _engine.View), Label.Effect);
                 _surface.Refresh();
-            }, 90, 66));
+                ShowPanel();
+            };
+            grid.Children.Add(b);
         }
         p.Children.Add(grid);
 
-        p.Children.Add(Section("조명"));
-        var wheel = new HueWheel { Width = 150, Height = 150, HorizontalAlignment = HorizontalAlignment.Center, Value = Engine.Unpack(v.LightColor), Cursor = new Cursor(StandardCursorType.Hand) };
+        p.Children.Add(Section("조명 휠"));
+        var wheel = new LightWheel
+        {
+            Width = 210,
+            Height = 210,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Angle = ((v.LightAngle % 360) + 360) % 360,
+            DiscColor = Engine.Unpack(v.LightColor),
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
+        ToolTip.SetTip(wheel, "해를 둘레를 따라 끌어 조명 방향을 바꿉니다. 가운데를 누르면 조명 색을 고릅니다.");
         bool started = false;
-        wheel.ValueChanged += (c, final) =>
+        wheel.AngleChanged += (a, final) =>
         {
             var nv = _engine.View;
-            nv.LightColor = Engine.Pack(c);
-            nv.Tint = Math.Max(nv.Tint, 0.35f);
+            nv.LightAngle = (float)a;
             _engine.SetView(nv, started ? Label.None : Label.Effect);
             started = !final;
             _surface.Refresh(final, !final);
         };
+        wheel.AddHandler(PointerPressedEvent, (_, e) =>
+        {
+            var pos = e.GetPosition(wheel);
+            var d = pos - new Point(wheel.Bounds.Width / 2, wheel.Bounds.Height / 2);
+            if (Math.Sqrt(d.X * d.X + d.Y * d.Y) < wheel.Bounds.Width * 0.25)
+            {
+                e.Handled = true;
+                PickColor(Engine.Unpack(_engine.View.LightColor), c =>
+                {
+                    var nv = _engine.View;
+                    nv.LightColor = Engine.Pack(c);
+                    nv.Tint = Math.Max(nv.Tint, 0.35f);
+                    _engine.SetView(nv, Label.Effect);
+                    _surface.Refresh();
+                });
+            }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         p.Children.Add(wheel);
-        Action Commit = () => _surface.Refresh();
+        Action commit = () => _surface.Refresh();
         void Edit(Func<ViewSettings, ViewSettings> f)
         {
             _engine.SetView(f(_engine.View));
             _surface.Refresh(false, true);
         }
-        p.Children.Add(SliderRow("밝기", 30, 170, v.Brightness * 100, x => Edit(s => { s.Brightness = (float)(x / 100); return s; }), x => $"{(int)x}%", Commit));
-        p.Children.Add(SliderRow("조명 회전", 0, 360, ((v.LightAngle % 360) + 360) % 360, x => Edit(s => { s.LightAngle = (float)x; return s; }), x => $"{(int)x}°", Commit));
-        p.Children.Add(SliderRow("주변광", 0, 100, v.Ambient * 100, x => Edit(s => { s.Ambient = (float)(x / 100); return s; }), x => $"{(int)x}%", Commit));
-        p.Children.Add(SliderRow("조명 색 강도", 0, 100, v.Tint * 100, x => Edit(s => { s.Tint = (float)(x / 100); return s; }), x => $"{(int)x}%", Commit));
-        p.Children.Add(Hint("효과는 캔버스와 3D 개체 전체에 비파괴적으로 적용되며, 이미지로 저장할 때 함께 반영됩니다. 조명 회전과 주변광은 3D 개체의 음영에 영향을 줍니다."));
+        p.Children.Add(ValueRow("밝기", 30, 170, v.Brightness * 100, x => Edit(s => { s.Brightness = (float)(x / 100); return s; }), "%", commit));
+        p.Children.Add(ValueRow("주변광", 0, 100, v.Ambient * 100, x => Edit(s => { s.Ambient = (float)(x / 100); return s; }), "%", commit));
     }
+
+    private static Color Blend(Color a, Color b, double t) =>
+        Color.FromRgb((byte)(a.R + (b.R - a.R) * t), (byte)(a.G + (b.G - a.G) * t), (byte)(a.B + (b.B - a.B) * t));
 
     private static ViewSettings ToView(Preset p, ViewSettings v)
     {
@@ -944,93 +1273,96 @@ public sealed class MainWindow : Window
     private void CanvasPanel(StackPanel p)
     {
         var v = _engine.View;
-        p.Children.Add(Header("캔버스"));
         if (S.CropMode)
         {
-            p.Children.Add(Section("자르기"));
+            p.Children.Add(Header("자르기"));
             p.Children.Add(Hint("손잡이를 끌거나 영역을 드래그해 남길 부분을 정한 뒤 '완료'를 누르세요."));
-            p.Children.Add(Grid2(Action("완료", () => { _surface.EndCrop(true); ShowPanel(); }), Action("취소", () => { _surface.EndCrop(false); ShowPanel(); })));
-            _panel.Content = p;
+            var done = WideButton("완료", null, () => { _surface.EndCrop(true); ShowPanel(); });
+            var cancel = WideButton("취소", null, () => { _surface.EndCrop(false); ShowPanel(); });
+            p.Children.Add(Row(done, cancel));
             return;
         }
-        var show = new ToggleSwitch { IsChecked = v.ShowBg != 0, OnContent = "켬", OffContent = "끔" };
-        show.IsCheckedChanged += (_, _) =>
+        p.Children.Add(Header("캔버스"));
+        ToggleSwitch Switch(bool on, Action<bool> set)
         {
-            var nv = _engine.View;
-            nv.ShowBg = show.IsChecked == true ? 1 : 0;
-            _engine.SetView(nv, Label.CanvasView);
-            _surface.Refresh();
-        };
-        p.Children.Add(Section("캔버스 표시"));
-        p.Children.Add(show);
-        p.Children.Add(Hint("끄면 배경이 투명해지며, PNG로 저장할 때 투명 배경이 유지됩니다."));
-
-        p.Children.Add(Section("캔버스 색"));
-        p.Children.Add(PaletteGrid(c =>
+            var t = new ToggleSwitch { IsChecked = on, OnContent = "켬", OffContent = "끔", Margin = new Thickness(0, -4, 0, 4) };
+            t.IsCheckedChanged += (_, _) => set(t.IsChecked == true);
+            return t;
+        }
+        p.Children.Add(new TextBlock { Text = "캔버스 표시", FontSize = 13, Foreground = Dark });
+        p.Children.Add(Switch(!S.HideCanvas, on =>
         {
-            var nv = _engine.View;
-            nv.Bg = Engine.Pack(c);
-            nv.ShowBg = 1;
-            _engine.SetView(nv, Label.CanvasView);
-            _surface.Refresh();
-            ShowPanel();
+            S.HideCanvas = !on;
+            _surface.Refresh(false);
         }));
+        p.Children.Add(new TextBlock { Text = "투명 캔버스", FontSize = 13, Foreground = Dark, Margin = new Thickness(0, 6, 0, 0) });
+        p.Children.Add(Switch(v.ShowBg == 0, on =>
+        {
+            var nv = _engine.View;
+            nv.ShowBg = on ? 0 : 1;
+            _engine.SetView(nv, Label.CanvasView);
+            _surface.Refresh();
+        }));
+        p.Children.Add(Divider());
 
-        p.Children.Add(Section("캔버스 크기"));
+        p.Children.Add(Section("캔버스 크기 조정"));
         var unit = Combo(new[] { "픽셀", "백분율" }, 0, _ => { });
-        var wBox = new NumericUpDown { Minimum = 1, Maximum = 16384, Value = _engine.Width, Increment = 1, FormatString = "0" };
-        var hBox = new NumericUpDown { Minimum = 1, Maximum = 16384, Value = _engine.Height, Increment = 1, FormatString = "0" };
-        var lockRatio = new CheckBox { Content = "가로 세로 비율 고정", IsChecked = true };
+        TextBox Box() => new() { HorizontalContentAlignment = HorizontalAlignment.Center, VerticalContentAlignment = VerticalAlignment.Center, Height = 36, Background = Brushes.White, BorderBrush = P3.BoxBorder };
+        var wBox = Box();
+        var hBox = Box();
+        var lockRatio = new CheckBox { Content = "가로 세로 비율 잠금", IsChecked = true };
         var scale = new CheckBox { Content = "캔버스와 함께 이미지 크기 조정", IsChecked = false };
         double ratio = (double)_engine.Width / _engine.Height;
         bool syncing = false;
         bool Percent() => unit.SelectedIndex == 1;
-        unit.SelectionChanged += (_, _) =>
+        string U() => Percent() ? "%" : "px";
+        double Num(TextBox b) => double.TryParse(new string((b.Text ?? "").Where(char.IsDigit).ToArray()), out var x) ? x : 0;
+        void ShowValues()
         {
             syncing = true;
-            wBox.Maximum = hBox.Maximum = Percent() ? 1000 : 16384;
-            wBox.Value = Percent() ? 100 : _engine.Width;
-            hBox.Value = Percent() ? 100 : _engine.Height;
+            wBox.Text = $"{(Percent() ? 100 : _engine.Width)}{U()}";
+            hBox.Text = $"{(Percent() ? 100 : _engine.Height)}{U()}";
             syncing = false;
-        };
-        wBox.ValueChanged += (_, _) =>
+        }
+        unit.SelectionChanged += (_, _) => ShowValues();
+        void Linked(TextBox from, TextBox to, bool widthChanged)
         {
-            if (syncing || lockRatio.IsChecked != true || wBox.Value is not { } x) return;
+            if (syncing || lockRatio.IsChecked != true) return;
+            var x = Num(from);
+            if (x <= 0) return;
             syncing = true;
-            hBox.Value = Math.Max(1, Math.Round(Percent() ? x : x / (decimal)ratio));
+            to.Text = $"{Math.Max(1, Math.Round(Percent() ? x : widthChanged ? x / ratio : x * ratio))}{U()}";
             syncing = false;
-        };
-        hBox.ValueChanged += (_, _) =>
+        }
+        void Apply()
         {
-            if (syncing || lockRatio.IsChecked != true || hBox.Value is not { } x) return;
-            syncing = true;
-            wBox.Value = Math.Max(1, Math.Round(Percent() ? x : x * (decimal)ratio));
-            syncing = false;
-        };
-        var sizes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,10,*") };
-        sizes.Children.Add(new StackPanel { Children = { Hint("너비"), wBox } });
-        var hp = new StackPanel { Children = { Hint("높이"), hBox } };
-        Grid.SetColumn(hp, 2);
-        sizes.Children.Add(hp);
-        p.Children.Add(unit);
-        p.Children.Add(sizes);
-        p.Children.Add(lockRatio);
-        p.Children.Add(scale);
-        p.Children.Add(Action("크기 적용", () =>
-        {
-            double w = (double)(wBox.Value ?? 1), h = (double)(hBox.Value ?? 1);
+            double w = Num(wBox), h = Num(hBox);
+            if (w <= 0 || h <= 0) { ShowValues(); return; }
             if (Percent()) { w = _engine.Width * w / 100; h = _engine.Height * h / 100; }
-            int iw = (int)Math.Round(w), ih = (int)Math.Round(h);
-            if (iw == _engine.Width && ih == _engine.Height) return;
+            int iw = (int)Math.Clamp(Math.Round(w), 1, 16384), ih = (int)Math.Clamp(Math.Round(h), 1, 16384);
+            if (iw == _engine.Width && ih == _engine.Height) { ShowValues(); return; }
             _engine.Resize(iw, ih, scale.IsChecked == true);
             _surface.Refresh();
             _surface.FitToView();
             ShowPanel();
-        }));
-        p.Children.Add(Hint("캔버스 가장자리의 손잡이를 끌어 크기를 바꿀 수도 있습니다(Shift: 비율 유지)."));
-
-        p.Children.Add(Section("자르기"));
-        p.Children.Add(Action("자르기", () => { _surface.BeginCrop(); ShowPanel(); }, Icons.Crop));
+        }
+        wBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Linked(wBox, hBox, true); Apply(); } };
+        hBox.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Linked(hBox, wBox, false); Apply(); } };
+        wBox.LostFocus += (_, _) => Linked(wBox, hBox, true);
+        hBox.LostFocus += (_, _) => Linked(hBox, wBox, false);
+        ShowValues();
+        var sizes = new Grid { ColumnDefinitions = new ColumnDefinitions("*,10,*") };
+        sizes.Children.Add(new StackPanel { Spacing = 4, Children = { new TextBlock { Text = "너비", FontSize = 12, Foreground = Dark }, wBox } });
+        var hp = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = "높이", FontSize = 12, Foreground = Dark }, hBox } };
+        Grid.SetColumn(hp, 2);
+        sizes.Children.Add(hp);
+        p.Children.Add(sizes);
+        p.Children.Add(lockRatio);
+        p.Children.Add(scale);
+        p.Children.Add(unit);
+        var apply = WideButton("크기 적용", null, Apply);
+        apply.Margin = new Thickness(0, 8, 0, 0);
+        p.Children.Add(apply);
 
         p.Children.Add(Section("회전 및 대칭"));
         void Op(Action a)
@@ -1040,52 +1372,208 @@ public sealed class MainWindow : Window
             _surface.FitToView();
             ShowPanel();
         }
-        p.Children.Add(Grid2(
-            Action("왼쪽으로 회전", () => Op(() => _engine.Rotate(false)), Icons.RotateLeft),
-            Action("오른쪽으로 회전", () => Op(() => _engine.Rotate(true)), Icons.RotateRight),
-            Action("좌우 대칭", () => Op(() => _engine.Flip(true)), Icons.FlipH),
-            Action("상하 대칭", () => Op(() => _engine.Flip(false)), Icons.FlipV)));
+        p.Children.Add(SquareRow(
+            SquareButton(Icons.RotateLeft, "왼쪽으로 회전", () => Op(() => _engine.Rotate(false))),
+            SquareButton(Icons.RotateRight, "오른쪽으로 회전", () => Op(() => _engine.Rotate(true))),
+            SquareButton(Icons.FlipH, "좌우 대칭", () => Op(() => _engine.Flip(true))),
+            SquareButton(Icons.FlipV, "상하 대칭", () => Op(() => _engine.Flip(false)))));
+
+        p.Children.Add(Section("캔버스 색"));
+        var colors = new UniformGrid { Columns = 6 };
+        foreach (var h in Palette)
+        {
+            var c = Color.Parse(h);
+            var cell = new Border { Height = 28, Background = new SolidColorBrush(c), Cursor = new Cursor(StandardCursorType.Hand) };
+            ToolTip.SetTip(cell, h);
+            cell.PointerPressed += (_, _) =>
+            {
+                var nv = _engine.View;
+                nv.Bg = Engine.Pack(c);
+                nv.ShowBg = 1;
+                _engine.SetView(nv, Label.CanvasView);
+                _surface.Refresh();
+                ShowPanel();
+            };
+            colors.Children.Add(cell);
+        }
+        p.Children.Add(colors);
     }
 
     private void LibraryPanel(StackPanel p)
     {
-        p.Children.Add(Header("3D 라이브러리"));
-        var search = new TextBox { Text = _libraryQuery, Watermark = "모델 검색", InnerLeftContent = new Border { Padding = new Thickness(8, 0, 0, 0), Child = Icons.Make(Icons.Search, 16) } };
-        var results = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(-8, -4, 0, 10) };
+        var back = new FlatButton { Width = 36, Height = 36, Child = Center(Icons.Make(Icons.Back, 18, P3.Text)) }.Init();
+        ToolTip.SetTip(back, "뒤로");
+        back.Click += () =>
+        {
+            if (_libraryCategory != null || _libraryQuery.Length > 0)
+            {
+                _libraryCategory = null;
+                _libraryQuery = "";
+                ShowPanel();
+            }
+            else SelectTab(_beforeLibrary == Tool.Library ? Tool.Shape3D : _beforeLibrary);
+        };
+        head.Children.Add(back);
+        head.Children.Add(new TextBlock { Text = _libraryCategory ?? "3D 라이브러리", FontSize = 20, Foreground = Dark, VerticalAlignment = VerticalAlignment.Center });
+        p.Children.Add(head);
+
+        var search = new TextBox { Text = _libraryQuery, Watermark = "검색", Height = 38, VerticalContentAlignment = VerticalAlignment.Center, Background = Brushes.White, BorderBrush = P3.BoxBorder };
+        var results = new WrapPanel { Margin = new Thickness(0, 12, -10, 0) };
+        double tileW = Math.Floor((SideWidth() - 36 - 1 - 20) / 3);
+        Control Tile(IImage thumb, string name, bool chevron, Action click)
+        {
+            var label = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(10, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center };
+            label.Children.Add(new TextBlock { Text = name, FontSize = 14, Foreground = Dark, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+            if (chevron)
+            {
+                var ch = Icons.Make(Icons.ChevronRight, 16, P3.Text);
+                Grid.SetColumn(ch, 1);
+                label.Children.Add(ch);
+            }
+            var art = new Border
+            {
+                Height = tileW,
+                Background = new LinearGradientBrush
+                {
+                    StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+                    EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+                    GradientStops = { new GradientStop(Color.Parse("#E4E6E7"), 0), new GradientStop(Color.Parse("#C9CCCD"), 1) },
+                },
+                Child = Center(Img(thumb, tileW * 0.72)),
+            };
+            var body = new DockPanel { Children = { art } };
+            DockPanel.SetDock(art, Dock.Top);
+            body.Children.Add(label);
+            var b = new FlatButton { Width = tileW, Height = tileW + 52, Normal = Brushes.White, Hover = P3.PaneHover, Margin = new Thickness(0, 0, 10, 10), Child = body }.Init();
+            ToolTip.SetTip(b, name);
+            b.Click += click;
+            return b;
+        }
         void Fill()
         {
             results.Children.Clear();
+            if (_libraryCategory == null && _libraryQuery.Length == 0)
+            {
+                foreach (var c in Library.Categories)
+                {
+                    var cat = c;
+                    var first = Library.Search(cat, "").First();
+                    results.Children.Add(Tile(ModelThumb(first.Name, first.Parts, first.Color, first.Finish, 160), cat, true, () => { _libraryCategory = cat; ShowPanel(); }));
+                }
+                return;
+            }
             foreach (var m in Library.Search(_libraryCategory, _libraryQuery))
             {
                 var model = m;
-                results.Children.Add(Tile(Labeled(Img(ModelThumb(m.Name, m.Parts, m.Color, m.Finish, 64)), m.Name), $"{m.Category} · {m.Name}", false,
-                    () => _surface.PlaceModel(model), 90, 88));
+                results.Children.Add(Tile(ModelThumb(m.Name, m.Parts, m.Color, m.Finish, 160), m.Name, false, () =>
+                {
+                    _surface.PlaceModel(model);
+                    ShowPanel();
+                }));
             }
             if (results.Children.Count == 0) results.Children.Add(Hint("검색 결과가 없습니다."));
         }
         search.TextChanged += (_, _) => { _libraryQuery = search.Text ?? ""; Fill(); };
         p.Children.Add(search);
-        var cats = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
-        foreach (var c in new string?[] { null }.Concat(Library.Categories))
-        {
-            var cat = c;
-            var b = new ToggleButton { Content = cat ?? "전체", IsChecked = _libraryCategory == cat, Margin = new Thickness(2), Padding = new Thickness(10, 4), FontSize = 12 };
-            b.Click += (_, _) => { _libraryCategory = cat; ShowPanel(); };
-            cats.Children.Add(b);
-        }
-        p.Children.Add(cats);
         Fill();
         p.Children.Add(results);
-        p.Children.Add(Hint("모델을 클릭하면 캔버스 가운데에 놓입니다. 이 모델들은 OpenPaint 3D가 기본 도형을 조합해 만든 자체 모델입니다(온라인 Remix 3D 라이브러리는 없습니다)."));
-        SelectedObjectSection(p);
-        if (_surface.Selected != 0)
+        p.Children.Add(Hint("라이브러리 모델은 OpenPaint 3D가 기본 도형을 조합해 만든 자체 모델입니다(온라인 Remix 3D 라이브러리는 없습니다)."));
+    }
+
+    // ---------------------------------------------------------------- welcome
+
+    private static string SettingsFile => Path.Combine(ConfigDir, "settings");
+
+    private static bool ShowWelcomeSetting
+    {
+        get
         {
-            p.Children.Add(FinishRow());
-            p.Children.Add(ColorSection());
+            try { return !File.Exists(SettingsFile) || !File.ReadAllLines(SettingsFile).Contains("welcome=0"); }
+            catch (IOException) { return true; }
+        }
+        set
+        {
+            try
+            {
+                Directory.CreateDirectory(ConfigDir);
+                File.WriteAllText(SettingsFile, value ? "welcome=1\n" : "welcome=0\n");
+            }
+            catch (IOException) { }
         }
     }
 
+    private void ShowWelcome()
+    {
+        Control BigTile(string title, string icon, Action click)
+        {
+            var b = new FlatButton
+            {
+                Width = 200,
+                Height = 150,
+                Normal = Brushes.White,
+                Hover = AccentLight,
+                Margin = new Thickness(0, 0, 14, 0),
+                Child = new StackPanel
+                {
+                    Spacing = 14,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Children = { Center(Icons.Make(icon, 40, P3.Title)), new TextBlock { Text = title, FontSize = 16, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Dark } },
+                },
+            }.Init();
+            b.Click += () =>
+            {
+                HideOverlay();
+                click();
+            };
+            return b;
+        }
+        var show = new CheckBox { Content = "시작할 때 이 화면 표시", IsChecked = true };
+        show.IsCheckedChanged += (_, _) => ShowWelcomeSetting = show.IsChecked == true;
+        var close = ColorDialog.DialogButton("닫기", HideOverlay);
+        close.Width = 110;
+        var bottom = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(0, 28, 0, 0), Children = { show } };
+        Grid.SetColumn(close, 1);
+        bottom.Children.Add(close);
+        var card = new Border
+        {
+            Background = P3.Pane,
+            Padding = new Thickness(36, 30),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            BoxShadow = BoxShadows.Parse("0 10 40 0 #60000000"),
+            Child = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = "OpenPaint 3D 시작", FontSize = 28, FontWeight = FontWeight.Light, Foreground = Dark },
+                    new TextBlock { Text = "새 프로젝트를 만들거나 그림을 열어 시작하세요.", FontSize = 13, Foreground = Muted, Margin = new Thickness(0, 6, 0, 22) },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Children =
+                        {
+                            BigTile("새로 만들기", Icons.New, () => { }),
+                            BigTile("열기", Icons.Open, () => _ = OpenFile()),
+                            BigTile("붙여넣기", Icons.Paste, () => _ = Paste()),
+                        },
+                    },
+                    bottom,
+                },
+            },
+        };
+        ShowOverlay(card);
+    }
+
     // ---------------------------------------------------------------- history
+
+    private void ShowHistory()
+    {
+        var flyout = new Flyout { Placement = PlacementMode.BottomEdgeAlignedRight };
+        flyout.Content = BuildHistory(flyout);
+        FlyoutBase.SetAttachedFlyout(_history, flyout);
+        FlyoutBase.ShowAttachedFlyout(_history);
+    }
 
     private Control BuildHistory(Flyout flyout)
     {
@@ -1137,7 +1625,7 @@ public sealed class MainWindow : Window
         _redo.IsEnabled = _engine.CanRedo;
         var name = _path != null ? Path.GetFileName(_path) : "제목 없음";
         Title = $"{(_dirty ? "*" : "")}{name} - OpenPaint 3D";
-        _sizeText.Text = $"{_engine.Width} × {_engine.Height} px";
+        _titleText.Text = Title;
     }
 
     private void UpdateZoom()
@@ -1167,6 +1655,11 @@ public sealed class MainWindow : Window
     {
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control), shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
         bool inText = e.Source is TextBox;
+        if (_overlay.IsVisible)
+        {
+            if (e.Key == Key.Escape) { HideOverlay(); e.Handled = true; }
+            return;
+        }
         if (_menu.IsVisible)
         {
             if (e.Key == Key.Escape) { HideMenu(); e.Handled = true; }
@@ -1191,6 +1684,7 @@ public sealed class MainWindow : Window
             case Key.D0 when ctrl: _surface.FitToView(); break;
             case Key.OemPlus when ctrl: _surface.SetZoom(_surface.Zoom * 1.25); break;
             case Key.OemMinus when ctrl: _surface.SetZoom(_surface.Zoom / 1.25); break;
+            case Key.C when ctrl && _surface.Selected != 0: _clipObject = _surface.Selected; ShowPanel(); break;
             case Key.Delete or Key.Back: _surface.DeleteSelection(); break;
             case Key.Enter: _surface.CommitPending(); break;
             case Key.Escape:
@@ -1236,9 +1730,10 @@ public sealed class MainWindow : Window
         Item("삽입", Icons.Insert);
         Item("저장", Icons.Save);
         Item("다른 이름으로 저장", Icons.SaveAs);
+        Item("설정", Icons.Settings);
         Item("정보", Icons.Info);
         Item("끝내기", Icons.Exit);
-        var left = new Border { Width = 280, Background = new SolidColorBrush(Color.Parse("#1F2A44")), Child = nav };
+        var left = new Border { Width = 280, Background = P3.Bar, Child = nav };
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Children = { left } };
         var right = new Border { Background = new SolidColorBrush(Color.Parse("#F3F3F3")), Padding = new Thickness(48, 40), Child = _menuContent };
         Grid.SetColumn(right, 1);
@@ -1253,7 +1748,7 @@ public sealed class MainWindow : Window
         _surface.CommitPending();
         _menu.IsVisible = true;
         foreach (var (name, row) in _menuItems)
-            row.Background = name == page ? new SolidColorBrush(Color.Parse("#34466E")) : Brushes.Transparent;
+            row.Background = name == page ? P3.TabSelected : Brushes.Transparent;
         var p = new StackPanel { Spacing = 14, MaxWidth = 900, HorizontalAlignment = HorizontalAlignment.Left };
         TextBlock Title(string t) => new() { Text = t, FontSize = 30, FontWeight = FontWeight.Light, Margin = new Thickness(0, 0, 0, 10) };
         Control BigTile(string title, string desc, string icon, Action click)
@@ -1274,7 +1769,7 @@ public sealed class MainWindow : Window
                     Spacing = 8,
                     Children =
                     {
-                        Icons.Make(icon, 34, Accent),
+                        Icons.Make(icon, 34, P3.Title),
                         new TextBlock { Text = title, FontSize = 16, FontWeight = FontWeight.SemiBold },
                         new TextBlock { Text = desc, FontSize = 12, Foreground = Muted, TextWrapping = TextWrapping.Wrap },
                     },
@@ -1333,11 +1828,18 @@ public sealed class MainWindow : Window
                 });
                 p.Children.Add(Hint("FBX 내보내기와 비디오 내보내기는 지원하지 않습니다."));
                 break;
+            case "설정":
+                p.Children.Add(Title("설정"));
+                var welcome = new ToggleSwitch { IsChecked = ShowWelcomeSetting, OnContent = "켬", OffContent = "끔" };
+                welcome.IsCheckedChanged += (_, _) => ShowWelcomeSetting = welcome.IsChecked == true;
+                p.Children.Add(new TextBlock { Text = "시작 화면 표시", FontSize = 14 });
+                p.Children.Add(welcome);
+                break;
             case "정보":
                 p.Children.Add(Title("정보"));
                 p.Children.Add(new TextBlock
                 {
-                    Text = "OpenPaint 3D 0.2.0\n\nPaint 3D의 화면 구성과 기능 설명을 참고해 C#(Avalonia)과 Rust로 새로 만든 오픈소스 그림판입니다.\n" +
+                    Text = "OpenPaint 3D 0.3.0\n\nPaint 3D의 화면 구성과 기능 설명을 참고해 C#(Avalonia)과 Rust로 새로 만든 오픈소스 그림판입니다.\n" +
                            "Microsoft의 코드나 리소스는 포함되어 있지 않으며 Microsoft와 관련이 없습니다.",
                     TextWrapping = TextWrapping.Wrap,
                     FontSize = 14,

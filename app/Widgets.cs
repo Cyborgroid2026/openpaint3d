@@ -10,12 +10,14 @@ public sealed class GeometryView : Control
 {
     public Func<Rect, Geometry> Build { get; init; } = r => new RectangleGeometry(r);
     public bool Filled { get; init; }
+    public IBrush Ink { get; set; } = new SolidColorBrush(Color.Parse("#2E3256"));
+    public double Inset { get; init; } = 9;
 
     public override void Render(DrawingContext ctx)
     {
-        var r = new Rect(Bounds.Size).Deflate(9);
+        var r = new Rect(Bounds.Size).Deflate(Inset);
         ctx.DrawGeometry(Filled ? new SolidColorBrush(Color.Parse("#C9E3F8")) : null,
-            new Pen(new SolidColorBrush(Color.Parse("#262626")), 1.6, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round), Build(r));
+            new Pen(Ink, 1.4, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round), Build(r));
     }
 }
 

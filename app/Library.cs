@@ -10,8 +10,8 @@ public static class Library
 
     public sealed record Model(string Name, string Category, string Color, int Finish, ModelPart[] Parts, string Keywords = "");
 
-    public static readonly string[] BasicNames = { "정육면체", "구", "원기둥", "원뿔", "피라미드", "캡슐" };
-    public static readonly int[] BasicPrims = { Cube, Sphere, Cylinder, Cone, Pyramid, Capsule };
+    public static readonly string[] BasicNames = { "정육면체", "구", "반구", "원뿔", "피라미드", "원기둥", "캡슐", "도넛" };
+    public static readonly int[] BasicPrims = { Cube, Sphere, Dome, Cone, Pyramid, Cylinder, Capsule, Torus };
 
     public static readonly string[] Categories = { "동물", "우주", "공룡", "비닐 토이", "사실적", "꽃·식물", "멋진 자동차", "생물학", "점성술" };
 

@@ -8,7 +8,7 @@ using Avalonia.Threading;
 
 namespace OpenPaint3D;
 
-public enum Tool { Brush, Shape2D, Shape3D, Sticker, Text, Effects, Canvas, Library }
+public enum Tool { Brush, Shape2D, Shape3D, Sticker, Text, Effects, Canvas, Library, Select }
 
 public sealed class ToolState
 {
@@ -38,7 +38,7 @@ public sealed class ToolState
     public Color FillColor2 = Color.Parse("#7E57C2");
     public double ShapeOpacity = 1;
 
-    // 3D shapes: basic primitive, people/animal model, or doodle (0 sharp, 1 soft)
+    // 3D shapes: basic primitive, people/animal model, or doodle (0 sharp, 1 soft, 2 tube)
     public int Basic;
     public Library.Model? Model;
     public int Doodle = -1;
@@ -58,6 +58,7 @@ public sealed class ToolState
     // canvas / view
     public bool CropMode;
     public bool View3D;
+    public bool HideCanvas;
 }
 
 public sealed class PaintSurface : Canvas
@@ -100,8 +101,11 @@ public sealed class PaintSurface : Canvas
 
     private static readonly IBrush Shadow = new SolidColorBrush(Color.FromArgb(38, 0, 0, 0));
     private static readonly IBrush AccentBrush = new SolidColorBrush(Color.Parse("#0078D7"));
-    private static readonly IPen Dash = new Pen(AccentBrush, 1.2, new DashStyle(new double[] { 4, 3 }, 0));
-    private static readonly IPen Solid = new Pen(AccentBrush, 1.2);
+    private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#2E3256"));
+    private static readonly IPen Dash = new Pen(new SolidColorBrush(Color.Parse("#3A3A3A")), 1, new DashStyle(new double[] { 3, 3 }, 0));
+    private static readonly IPen Solid = new Pen(Ink, 1.2);
+    private static readonly IPen GlyphPen = new Pen(Ink, 1.5, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+    private const double KnobR = 17, KnobGap = 38;
     private static readonly IPen CursorPen = new Pen(new SolidColorBrush(Color.FromArgb(160, 60, 60, 60)), 1);
     private static readonly IBrush Dim = new SolidColorBrush(Color.FromArgb(90, 0, 0, 0));
     private static readonly IBrush HandleFill = Brushes.White;
@@ -182,7 +186,17 @@ public sealed class PaintSurface : Canvas
             _bmp?.Dispose();
             _bmp = Engine.CreateBitmap();
         }
-        Engine.CopyDisplay(_bmp, Engine.ObjectCount > 0 ? _quality : 2);
+        if (S.HideCanvas)
+        {
+            // show only the 3D objects: draw with the background switched off, then restore it
+            var v = Engine.View;
+            var hidden = v;
+            hidden.ShowBg = 0;
+            Engine.SetView(hidden);
+            Engine.CopyDisplay(_bmp, Engine.ObjectCount > 0 ? _quality : 2);
+            Engine.SetView(v);
+        }
+        else Engine.CopyDisplay(_bmp, Engine.ObjectCount > 0 ? _quality : 2);
         Redraw();
     }
 
@@ -317,8 +331,12 @@ public sealed class PaintSurface : Canvas
         if (_bmp == null) return;
         var o = Origin;
         var dest = new Rect(o.X, o.Y, W * Zoom, H * Zoom);
-        ctx.FillRectangle(Shadow, dest.Translate(new Vector(0, 3)).Inflate(2));
-        if (Engine.View.ShowBg == 0) ctx.FillRectangle(Checker, dest);
+        DrawWorkspace(ctx, dest);
+        if (!S.HideCanvas)
+        {
+            ctx.FillRectangle(Shadow, dest.Translate(new Vector(0, 2)).Inflate(1));
+            if (Engine.View.ShowBg == 0) ctx.FillRectangle(Checker, dest);
+        }
         using (ctx.PushRenderOptions(new RenderOptions
         {
             BitmapInterpolationMode = Zoom >= 2 ? BitmapInterpolationMode.None : BitmapInterpolationMode.HighQuality,
@@ -336,14 +354,18 @@ public sealed class PaintSurface : Canvas
 
         if (_drag == Drag.Doodle && _doodle.Count > 1)
         {
+            bool tube = S.Doodle == 2;
             var g = new StreamGeometry();
             using (var c = g.Open())
             {
-                c.BeginFigure(ToView(_doodle[0]), true);
+                c.BeginFigure(ToView(_doodle[0]), !tube);
                 foreach (var pt in _doodle.Skip(1)) c.LineTo(ToView(pt));
-                c.EndFigure(true);
+                c.EndFigure(!tube);
             }
-            ctx.DrawGeometry(new SolidColorBrush(S.Color, 0.35), new Pen(new SolidColorBrush(S.Color), 2), g);
+            if (tube)
+                ctx.DrawGeometry(null, new Pen(new SolidColorBrush(S.Color, 0.5), TubeWidth * Zoom, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round), g);
+            else
+                ctx.DrawGeometry(new SolidColorBrush(S.Color, 0.35), new Pen(new SolidColorBrush(S.Color), 2), g);
         }
 
         if (_drag == Drag.NewBox)
@@ -368,11 +390,47 @@ public sealed class PaintSurface : Canvas
         }
     }
 
+    private static readonly IBrush Wall = new SolidColorBrush(Color.Parse("#B4B6B6"));
+
+    /// <summary>Grey studio backdrop with a lighter "floor" band under the canvas.</summary>
+    private void DrawWorkspace(DrawingContext ctx, Rect dest)
+    {
+        var all = new Rect(Bounds.Size);
+        ctx.FillRectangle(Wall, all);
+        double top = Math.Min(Math.Max(dest.Bottom - 6, all.Height * 0.35), all.Height - 20);
+        var floor = new LinearGradientBrush
+        {
+            StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative),
+            EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
+            GradientStops =
+            {
+                new GradientStop(Color.Parse("#B4B6B6"), 0),
+                new GradientStop(Color.Parse("#D3D5D5"), 0.12),
+                new GradientStop(Color.Parse("#C2C4C3"), 0.45),
+                new GradientStop(Color.Parse("#B9BBBA"), 1),
+            },
+        };
+        ctx.FillRectangle(floor, new Rect(0, top, all.Width, Math.Max(1, all.Height - top)));
+    }
+
     private static void Handle(DrawingContext ctx, Point p, bool round = false)
     {
-        if (round) ctx.DrawEllipse(HandleFill, Solid, p, 6, 6);
-        else ctx.DrawRectangle(HandleFill, Solid, new Rect(p.X - 5, p.Y - 5, 10, 10));
+        if (round) ctx.DrawEllipse(HandleFill, Solid, p, 5, 5);
+        else ctx.DrawRectangle(HandleFill, Solid, new Rect(p.X - 4, p.Y - 4, 8, 8));
     }
+
+    /// <summary>Round action knob (white disc, ink outline, glyph drawn on a 24px grid).</summary>
+    private static void Knob(DrawingContext ctx, Point p, string glyph)
+    {
+        ctx.DrawEllipse(HandleFill, Solid, p, KnobR, KnobR);
+        var g = Geometry.Parse(glyph);
+        using (ctx.PushTransform(Matrix.CreateTranslation(p.X - 12, p.Y - 12)))
+            ctx.DrawGeometry(null, GlyphPen, g);
+    }
+
+    private static readonly string RotateGlyph = "M7,9 A6,6 0 1 1 8,16 M7,5 V9 H11 M12,12 V12.2";
+    private static readonly string StampGlyph = "M9,5 H15 V10 C15,11 18,12 18,14 H6 C6,12 9,11 9,10 Z M5,17 H19 V19 H5 Z";
+    private static readonly string CheckGlyph = "M6,12.5 L10.5,17 L18,8";
 
     // ---------------------------------------------------- pending item handles
 
@@ -387,14 +445,20 @@ public sealed class PaintSurface : Canvas
         return local.Select(l => ToView(p.ToCanvas(l))).ToArray();
     }
 
-    private Point RotateHandle(Pending2D p)
+    /// <summary>Knob beyond the middle of an edge: 0 top (rotate), 1 left (stamp), 2 right (done).</summary>
+    private Point PendingKnob(Pending2D p, int which)
     {
-        var top = ToView(p.ToCanvas(new Point(p.Box.Center.X, p.Box.Top)));
+        var b = p.Box;
+        var local = which switch { 0 => new Point(b.Center.X, b.Top), 1 => new Point(b.Left, b.Center.Y), _ => new Point(b.Right, b.Center.Y) };
+        var edge = ToView(p.ToCanvas(local));
         var center = ToView(p.Center);
-        var dir = top - center;
+        var dir = edge - center;
         var len = Math.Sqrt(dir.X * dir.X + dir.Y * dir.Y);
-        return len < 1 ? top - new Vector(0, 30) : top + dir / len * 30;
+        var fallback = which switch { 0 => new Vector(0, -1), 1 => new Vector(-1, 0), _ => new Vector(1, 0) };
+        return edge + (len < 1 ? fallback : dir / len) * KnobGap;
     }
+
+    private Point RotateHandle(Pending2D p) => PendingKnob(p, 0);
 
     private void DrawPendingHandles(DrawingContext ctx, Pending2D p)
     {
@@ -408,9 +472,17 @@ public sealed class PaintSurface : Canvas
         ctx.DrawGeometry(null, Dash, new PolylineGeometry(new[] { k[0], k[1], k[2], k[3] }, true));
         if (_editor.IsVisible) return;
         for (int i = 0; i < 8; i++) Handle(ctx, k[i]);
-        var rh = RotateHandle(p);
-        ctx.DrawLine(Solid, k[4], rh);
-        Handle(ctx, rh, true);
+        string[] glyphs = { RotateGlyph, StampGlyph, CheckGlyph };
+        int[] edges = { 4, 7, 5 };
+        for (int i = 0; i < 3; i++)
+        {
+            var kp = PendingKnob(p, i);
+            var from = k[edges[i]];
+            var dir = kp - from;
+            var len = Math.Max(1, Math.Sqrt(dir.X * dir.X + dir.Y * dir.Y));
+            ctx.DrawLine(Solid, from, kp - dir / len * KnobR);
+            Knob(ctx, kp, glyphs[i]);
+        }
     }
 
     // ------------------------------------------------------------ 3D gizmo
@@ -424,19 +496,19 @@ public sealed class PaintSurface : Canvas
         return (r, new[]
         {
             r.TopLeft, r.TopRight, r.BottomRight, r.BottomLeft,           // 0-3 scale
-            new Point(c.X, r.Top - 26),                                     // 4 rotate around X
-            new Point(r.Left - 26, c.Y),                                    // 5 rotate around Y
-            new Point(c.X, r.Bottom + 26),                                  // 6 rotate around Z
-            new Point(r.Right + 26, c.Y),                                   // 7 depth
+            new Point(r.Right + KnobGap, c.Y),                              // 4 rotate around X (right)
+            new Point(c.X, r.Bottom + KnobGap),                             // 5 rotate around Y (bottom)
+            new Point(c.X, r.Top - KnobGap),                                // 6 rotate around Z (top)
+            new Point(r.Left - KnobGap, c.Y),                               // 7 depth (left)
         });
     }
 
     private static readonly string[] GizmoGlyphs =
     {
-        "M-5,-2 A6,3 0 1 0 5,-2 M3,-5 L5,-2 L2,0",     // X rotation
-        "M-2,-5 A3,6 0 1 0 -2,5 M-5,3 L-2,5 L0,2",     // Y rotation
-        "M4,-4 A6,6 0 1 0 6,1 M6,-5 L4,-4 L5,-1",       // Z rotation
-        "M0,-6 V6 M-3,-3 L0,-6 L3,-3 M-3,3 L0,6 L3,3",  // depth
+        "M14,6 A3,6 0 1 0 14,18 M12,4 L14,6 L11,8 M12,12 V12.2",      // X rotation (vertical tumble)
+        "M6,10 A6,3 0 1 0 18,10 M4,12 L6,10 L8,13 M12,12 V12.2",      // Y rotation (spin)
+        RotateGlyph,                                                   // Z rotation
+        "M8,7 H16 L18,17 H6 Z M12,9 V15 M10,13 L12,15 L14,13",        // depth (push back / pull forward)
     };
 
     private void DrawGizmo(DrawingContext ctx, ObjInfo info)
@@ -444,13 +516,16 @@ public sealed class PaintSurface : Canvas
         var (r, hs) = GizmoLayout(info);
         ctx.DrawRectangle(null, Dash, r);
         for (int i = 0; i < 4; i++) Handle(ctx, hs[i]);
+        var c = r.Center;
+        Point[] edges = { new(r.Right, c.Y), new(c.X, r.Bottom), new(c.X, r.Top), new(r.Left, c.Y) };
         for (int i = 0; i < 4; i++)
         {
             var p = hs[4 + i];
-            ctx.DrawEllipse(HandleFill, Solid, p, 11, 11);
-            var g = Geometry.Parse(GizmoGlyphs[i]);
-            using (ctx.PushTransform(Matrix.CreateTranslation(p.X, p.Y)))
-                ctx.DrawGeometry(null, new Pen(AccentBrush, 1.5, lineCap: PenLineCap.Round), g);
+            var dir = p - edges[i];
+            var len = Math.Max(1, Math.Sqrt(dir.X * dir.X + dir.Y * dir.Y));
+            Handle(ctx, edges[i]);
+            ctx.DrawLine(Solid, edges[i], p - dir / len * KnobR);
+            Knob(ctx, p, GizmoGlyphs[i]);
         }
     }
 
@@ -576,10 +651,22 @@ public sealed class PaintSurface : Canvas
             }
             else if (!_editor.IsVisible)
             {
-                if (Distance(pos, RotateHandle(p)) <= 9)
+                if (Distance(pos, RotateHandle(p)) <= KnobR)
                 {
                     _startAngle = p.Angle;
                     Begin(Drag.PendRotate, e);
+                    return;
+                }
+                if (Distance(pos, PendingKnob(p, 1)) <= KnobR)
+                {
+                    StampPending();
+                    e.Handled = true;
+                    return;
+                }
+                if (Distance(pos, PendingKnob(p, 2)) <= KnobR)
+                {
+                    CommitPending();
+                    e.Handled = true;
                     return;
                 }
                 _handle = HitList(pos, PendingCorners(p));
@@ -607,7 +694,10 @@ public sealed class PaintSurface : Canvas
         if (Selected != 0 && Engine.Info(Selected) is { } info)
         {
             var (r, hs) = GizmoLayout(info);
-            int hi = HitList(pos, hs, 11);
+            int hi = HitList(pos, hs[..4], 7);
+            if (hi < 0)
+                for (int i = 4; i < 8; i++)
+                    if (Distance(pos, hs[i]) <= KnobR) hi = i;
             if (hi >= 0)
             {
                 _handle = hi;
@@ -616,7 +706,7 @@ public sealed class PaintSurface : Canvas
                 Begin(hi < 4 ? Drag.ObjScale : hi == 4 ? Drag.ObjRotX : hi == 5 ? Drag.ObjRotY : hi == 6 ? Drag.ObjRotZ : Drag.ObjDepth, e);
                 return;
             }
-            if (Engine.PickObject(c) == Selected || (r.Contains(pos) && S.Tool is Tool.Shape3D or Tool.Library))
+            if (Engine.PickObject(c) == Selected || (r.Contains(pos) && S.Tool is Tool.Shape3D or Tool.Library or Tool.Select))
             {
                 _startObj = info;
                 Engine.Checkpoint(Label.EditObject);
@@ -624,7 +714,7 @@ public sealed class PaintSurface : Canvas
                 return;
             }
         }
-        if (S.Tool is Tool.Shape3D or Tool.Library or Tool.Effects && Engine.PickObject(c) is var hit and > 0)
+        if (S.Tool is Tool.Shape3D or Tool.Library or Tool.Effects or Tool.Select && Engine.PickObject(c) is var hit and > 0)
         {
             Select(hit);
             _startObj = Engine.Info(hit)!.Value;
@@ -955,25 +1045,36 @@ public sealed class PaintSurface : Canvas
         Select(id);
     }
 
+    private const double TubeWidth = 36;
+
     private void CreateDoodle()
     {
         var pts = _doodle.ToList();
         _doodle.Clear();
-        if (pts.Count < 3) return;
+        bool tube = S.Doodle == 2;
+        if (pts.Count < (tube ? 2 : 3)) return;
         double x0 = pts.Min(p => p.X), y0 = pts.Min(p => p.Y), x1 = pts.Max(p => p.X), y1 = pts.Max(p => p.Y);
-        if (x1 - x0 < 8 || y1 - y0 < 8) return;
+        if (tube)
+        {
+            // a tube is the stroke itself, inflated round
+            double r = TubeWidth / 2;
+            (x0, y0, x1, y1) = (x0 - r, y0 - r, x1 + r, y1 + r);
+        }
+        else if (x1 - x0 < 8 || y1 - y0 < 8) return;
         double k = Math.Min(1.0, 260 / Math.Max(x1 - x0, y1 - y0));
         int mw = Math.Max(2, (int)Math.Ceiling((x1 - x0) * k)), mh = Math.Max(2, (int)Math.Ceiling((y1 - y0) * k));
         var g = new StreamGeometry();
         using (var c = g.Open())
         {
-            c.BeginFigure(new Point((pts[0].X - x0) * k, (pts[0].Y - y0) * k), true);
+            c.BeginFigure(new Point((pts[0].X - x0) * k, (pts[0].Y - y0) * k), !tube);
             foreach (var p in pts.Skip(1)) c.LineTo(new Point((p.X - x0) * k, (p.Y - y0) * k));
-            c.EndFigure(true);
+            c.EndFigure(!tube);
         }
-        var mask = RenderMask(mw, mh, dc => dc.DrawGeometry(Brushes.White, null, g));
-        bool soft = S.Doodle == 1;
-        double w = x1 - x0, h = y1 - y0, depth = Math.Min(w, h) * (soft ? 0.5 : 0.3);
+        var mask = tube
+            ? RenderMask(mw, mh, dc => dc.DrawGeometry(null, new Pen(Brushes.White, TubeWidth * k, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round), g))
+            : RenderMask(mw, mh, dc => dc.DrawGeometry(Brushes.White, null, g));
+        bool soft = S.Doodle >= 1;
+        double w = x1 - x0, h = y1 - y0, depth = tube ? TubeWidth : Math.Min(w, h) * (soft ? 0.5 : 0.3);
         var id = Engine.AddMaskObject(mask, mw, mh, soft, new Vector3D((x0 + x1) / 2, (y0 + y1) / 2, -depth / 2 - 1),
             new Vector3D(w, h, depth), 0, S.Color, S.Finish, Label.AddObject);
         Refresh();
@@ -1039,6 +1140,17 @@ public sealed class PaintSurface : Canvas
             Engine.Blend(rtb, origin.X, origin.Y, p.Opacity, p.Finish, p.Label);
         Refresh();
         SelectionChanged?.Invoke();
+    }
+
+    /// <summary>Stamp a copy of the item onto the canvas and keep editing it (Paint 3D's stamp knob).</summary>
+    public void StampPending()
+    {
+        if (Pending is not { } p || p is TextItem) return;
+        using (var rtb = p.Rasterize(out var origin))
+            Engine.Blend(rtb, origin.X, origin.Y, p.Opacity, p.Finish, p.Label);
+        if (p is CurveItem c) c.Translate(new Vector(24, 24));
+        else p.Box = p.Box.Translate(new Vector(24, 24));
+        Refresh();
     }
 
     public void CancelPending()

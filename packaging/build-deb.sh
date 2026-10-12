@@ -2,7 +2,7 @@
 # Build the Rust engine and the self-contained C# app, then package a .deb.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION=0.2.0
+VERSION=0.3.0
 ARCH=amd64
 PKG=openpaint3d_${VERSION}_${ARCH}
 STAGE="$ROOT/build/$PKG"
