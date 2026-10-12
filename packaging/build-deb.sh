@@ -2,13 +2,17 @@
 # Build the Rust engine and the self-contained C# app, then package a .deb.
 set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION=0.1.1
+VERSION=0.2.0
 ARCH=amd64
 PKG=openpaint3d_${VERSION}_${ARCH}
 STAGE="$ROOT/build/$PKG"
 
 cargo build --release --manifest-path "$ROOT/engine/Cargo.toml"
 cargo test --release --manifest-path "$ROOT/engine/Cargo.toml"
+
+# headless UI walkthrough: drives the real window and must pass before packaging
+dotnet build "$ROOT/uitest/UiTest.csproj" -c Release
+dotnet "$ROOT/uitest/bin/Release/net10.0/UiTest.dll" "$ROOT/build-uitest"
 
 rm -rf "$ROOT/build" && mkdir -p "$STAGE/DEBIAN" "$STAGE/opt/openpaint3d" "$STAGE/usr/bin" \
     "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/256x256/apps"

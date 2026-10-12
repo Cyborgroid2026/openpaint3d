@@ -245,7 +245,7 @@ fn render_band(objs: &[Obj], cam: &Camera, light: &Light, plane: Option<&Plane>,
                 let i = (ty * p.tw + tx) * 4;
                 let c = [p.tex[i] as f32 / 255.0, p.tex[i + 1] as f32 / 255.0, p.tex[i + 2] as f32 / 255.0];
                 let dif = n.dot(light.dir).abs() * light.intensity;
-                let k = 0.55 + 0.45 * dif;
+                let k = 0.82 + 0.18 * dif;
                 let _ = view;
                 [c[0] * k * (0.6 + 0.4 * light.color[0]), c[1] * k * (0.6 + 0.4 * light.color[1]), c[2] * k * (0.6 + 0.4 * light.color[2])]
             });

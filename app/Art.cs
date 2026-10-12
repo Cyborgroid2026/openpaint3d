@@ -1,11 +1,12 @@
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Controls.Shapes;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 
 namespace OpenPaint3D;
 
-/// <summary>Line icons for the toolbar (24x24 design grid, stroked).</summary>
+/// <summary>Line icons (24x24 design grid, stroked).</summary>
 public static class Icons
 {
     public const string Menu = "M3,6 H10 L12,8 H21 V19 H3 Z";
@@ -16,11 +17,31 @@ public static class Icons
     public const string Text = "M5,5 H19 M12,5 V20 M9,20 H15";
     public const string Effects = "M12,8 A4,4 0 1 0 12,16 A4,4 0 1 0 12,8 Z M12,1 V4 M12,20 V23 M1,12 H4 M20,12 H23 M4.2,4.2 L6.3,6.3 M17.7,17.7 L19.8,19.8 M4.2,19.8 L6.3,17.7 M17.7,6.3 L19.8,4.2";
     public const string Canvas = "M6,2 V18 H22 M2,6 H18 V22";
-    public const string Select = "M3,21 L14,10 M15,3 L16,6 L19,7 L16,8 L15,11 L14,8 L11,7 L14,6 Z M20,12 L21,13 M19,2 L20,1";
+    public const string Library = "M4,4 H10 V10 H4 Z M14,4 H20 V10 H14 Z M4,14 H10 V20 H4 Z M17,14 L20,17 L17,20 L14,17 Z";
     public const string Undo = "M9,5 L4,10 L9,15 M4,10 H15 A5,5 0 0 1 15,20 H11";
     public const string Redo = "M15,5 L20,10 L15,15 M20,10 H9 A5,5 0 0 0 9,20 H13";
+    public const string History = "M4,12 A8,8 0 1 0 6.3,6.3 M4,4 V9 H9 M12,7 V12 L15,14";
+    public const string Paste = "M8,4 H5 V21 H19 V4 H16 M8,2 H16 V6 H8 Z M9,11 H15 M9,15 H15";
     public const string Picker = "M15,3 L21,9 M18,6 L8,16 L5,19 M8,16 H5 V19 M13,5 L19,11";
     public const string Bucket = "M5,11 L12,4 L19,11 L12,18 Z M19,11 C21,14 21,16 20,17 C19,18 18,17 18,15 Z M5,11 H19";
+    public const string View3D = "M12,3 L20,7.5 V16.5 L12,21 L4,16.5 V7.5 Z M4,7.5 L12,12 L20,7.5 M12,12 V21 M1,12 C3,9 5,9 7,10 M17,10 C19,9 21,9 23,12";
+    public const string Back = "M15,5 L8,12 L15,19";
+    public const string New = "M6,2 H14 L19,7 V22 H6 Z M14,2 V7 H19 M12,11 V18 M8.5,14.5 H15.5";
+    public const string Open = "M3,6 H10 L12,8 H21 V19 H3 Z M3,11 H21";
+    public const string Insert = "M4,4 H20 V20 H4 Z M4,16 L9,11 L13,15 L16,12 L20,16 M15,8 A1.5,1.5 0 1 0 15,8.01";
+    public const string Save = "M4,4 H17 L20,7 V20 H4 Z M8,4 V9 H15 V4 M7,20 V13 H17 V20";
+    public const string SaveAs = "M4,4 H17 L20,7 V13 M4,4 V20 H11 M8,4 V9 H15 V4 M14,20 L20,14 L22,16 L16,22 H14 Z";
+    public const string Info = "M12,2 A10,10 0 1 0 12,22 A10,10 0 1 0 12,2 Z M12,10 V17 M12,7 V7.5";
+    public const string Exit = "M14,4 H20 V20 H14 M10,8 L6,12 L10,16 M6,12 H16";
+    public const string Crop = "M6,2 V18 H22 M2,6 H18 V22";
+    public const string Trash = "M4,6 H20 M9,6 V3 H15 V6 M6,6 L7,21 H17 L18,6 M10,10 V17 M14,10 V17";
+    public const string Copy = "M8,8 H20 V20 H8 Z M4,16 V4 H16";
+    public const string RotateLeft = "M4,4 V9 H9 M4.5,9 A8,8 0 1 1 6,16";
+    public const string RotateRight = "M20,4 V9 H15 M19.5,9 A8,8 0 1 0 18,16";
+    public const string FlipH = "M12,2 V22 M9,6 L3,18 H9 Z M15,6 L21,18 H15 Z";
+    public const string FlipV = "M2,12 H22 M6,9 L18,3 V9 Z M6,15 L18,21 V15 Z";
+    public const string Make3D = "M5,9 L12,5 L19,9 L12,13 Z M5,9 V15 L12,19 V13 M19,9 V15 L12,19";
+    public const string Search = "M10,3 A7,7 0 1 0 10,17 A7,7 0 1 0 10,3 Z M15,15 L21,21";
 
     public static Avalonia.Controls.Shapes.Path Make(string data, double size = 24, IBrush? stroke = null) => new()
     {
@@ -35,43 +56,153 @@ public static class Icons
     };
 }
 
-/// <summary>Original vector stickers, drawn on a 100x100 grid.</summary>
-public static class Stickers
+/// <summary>The 24 2D shapes of the 2D shapes panel, built for any box.</summary>
+public static class Shapes2D
 {
-    public static readonly string[] Names = { "별", "하트", "스마일", "해", "구름", "번개", "꽃", "말풍선", "무지개" };
+    public static readonly string[] Names =
+    {
+        "사각형", "둥근 사각형", "원", "캡슐", "삼각형", "직각 삼각형", "마름모", "평행사변형",
+        "사다리꼴", "오각형", "육각형", "팔각형", "별(4개 꼭짓점)", "별(5개 꼭짓점)", "별(6개 꼭짓점)", "하트",
+        "십자", "오른쪽 화살표", "위쪽 화살표", "양방향 화살표", "갈매기형", "사각형 말풍선", "타원형 말풍선", "번개",
+    };
 
-    private static IBrush B(string c) => new SolidColorBrush(Color.Parse(c));
-    private static IPen P(string c, double w) => new Pen(B(c), w, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+    public static readonly string[] LineNames = { "직선", "3점 곡선", "4점 곡선", "5점 곡선" };
 
-    private static Geometry Poly(params Point[] pts)
+    private static Geometry Poly(Rect r, params double[] xy)
     {
         var g = new StreamGeometry();
         using (var c = g.Open())
         {
-            c.BeginFigure(pts[0], true);
-            foreach (var p in pts.Skip(1)) c.LineTo(p);
+            for (int i = 0; i < xy.Length; i += 2)
+            {
+                var p = new Point(r.X + xy[i] * r.Width, r.Y + xy[i + 1] * r.Height);
+                if (i == 0) c.BeginFigure(p, true);
+                else c.LineTo(p);
+            }
             c.EndFigure(true);
         }
         return g;
     }
 
+    private static Geometry Star(Rect r, int n, double inner)
+    {
+        var xy = new List<double>();
+        for (int i = 0; i < n * 2; i++)
+        {
+            double a = -Math.PI / 2 + i * Math.PI / n, k = i % 2 == 0 ? 0.5 : 0.5 * inner;
+            xy.Add(0.5 + Math.Cos(a) * k);
+            xy.Add(0.5 + Math.Sin(a) * k);
+        }
+        return Poly(r, xy.ToArray());
+    }
+
+    private static Geometry Regular(Rect r, int n)
+    {
+        var xy = new List<double>();
+        for (int i = 0; i < n; i++)
+        {
+            double a = -Math.PI / 2 + i * 2 * Math.PI / n + (n % 2 == 0 ? Math.PI / n : 0);
+            xy.Add(0.5 + Math.Cos(a) * 0.5);
+            xy.Add(0.5 + Math.Sin(a) * 0.5);
+        }
+        return Poly(r, xy.ToArray());
+    }
+
+    private static Geometry Svg(Rect r, string d)
+    {
+        // path authored on a 100x100 grid
+        var g = Geometry.Parse(d);
+        g.Transform = new MatrixTransform(Matrix.CreateScale(r.Width / 100, r.Height / 100) * Matrix.CreateTranslation(r.X, r.Y));
+        return g;
+    }
+
+    public static Geometry Build(int kind, Rect r)
+    {
+        double rr = Math.Min(r.Width, r.Height);
+        return kind switch
+        {
+            0 => new RectangleGeometry(r),
+            1 => new RectangleGeometry(r, rr * 0.18, rr * 0.18),
+            2 => new EllipseGeometry(r),
+            3 => new RectangleGeometry(r, rr / 2, rr / 2),
+            4 => Poly(r, 0.5, 0, 1, 1, 0, 1),
+            5 => Poly(r, 0, 0, 1, 1, 0, 1),
+            6 => Poly(r, 0.5, 0, 1, 0.5, 0.5, 1, 0, 0.5),
+            7 => Poly(r, 0.25, 0, 1, 0, 0.75, 1, 0, 1),
+            8 => Poly(r, 0.22, 0, 0.78, 0, 1, 1, 0, 1),
+            9 => Regular(r, 5),
+            10 => Regular(r, 6),
+            11 => Regular(r, 8),
+            12 => Star(r, 4, 0.4),
+            13 => Star(r, 5, 0.45),
+            14 => Star(r, 6, 0.55),
+            15 => Svg(r, "M50,96 C18,72 0,54 0,32 C0,14 13,2 28,2 C39,2 46,8 50,16 C54,8 61,2 72,2 C87,2 100,14 100,32 C100,54 82,72 50,96 Z"),
+            16 => Poly(r, 0.33, 0, 0.67, 0, 0.67, 0.33, 1, 0.33, 1, 0.67, 0.67, 0.67, 0.67, 1, 0.33, 1, 0.33, 0.67, 0, 0.67, 0, 0.33, 0.33, 0.33),
+            17 => Poly(r, 0, 0.3, 0.6, 0.3, 0.6, 0, 1, 0.5, 0.6, 1, 0.6, 0.7, 0, 0.7),
+            18 => Poly(r, 0.5, 0, 1, 0.4, 0.7, 0.4, 0.7, 1, 0.3, 1, 0.3, 0.4, 0, 0.4),
+            19 => Poly(r, 0, 0.5, 0.25, 0, 0.25, 0.3, 0.75, 0.3, 0.75, 0, 1, 0.5, 0.75, 1, 0.75, 0.7, 0.25, 0.7, 0.25, 1),
+            20 => Poly(r, 0, 0, 0.6, 0, 1, 0.5, 0.6, 1, 0, 1, 0.4, 0.5),
+            21 => Svg(r, "M8,0 H92 Q100,0 100,8 V62 Q100,70 92,70 H42 L22,100 L26,70 H8 Q0,70 0,62 V8 Q0,0 8,0 Z"),
+            22 => Svg(r, "M50,0 C78,0 100,16 100,36 C100,56 78,72 50,72 C44,72 38,71 33,70 L14,96 L19,64 C7,58 0,48 0,36 C0,16 22,0 50,0 Z"),
+            _ => Poly(r, 0.6, 0, 0.15, 0.56, 0.45, 0.56, 0.35, 1, 0.85, 0.4, 0.55, 0.4),
+        };
+    }
+
+    /// <summary>Smooth curve through the given points (Catmull-Rom as cubic Béziers).</summary>
+    public static Geometry Curve(IReadOnlyList<Point> p)
+    {
+        var g = new StreamGeometry();
+        using var c = g.Open();
+        c.BeginFigure(p[0], false);
+        if (p.Count == 2)
+        {
+            c.LineTo(p[1]);
+        }
+        else
+        {
+            for (int i = 0; i < p.Count - 1; i++)
+            {
+                var p0 = p[Math.Max(i - 1, 0)];
+                var p1 = p[i];
+                var p2 = p[i + 1];
+                var p3 = p[Math.Min(i + 2, p.Count - 1)];
+                c.CubicBezierTo(p1 + (p2 - p0) / 6, p2 - (p3 - p1) / 6, p2);
+            }
+        }
+        c.EndFigure(false);
+        return g;
+    }
+}
+
+/// <summary>Original vector stickers, drawn on a 100x100 grid.</summary>
+public static class Stickers
+{
+    public static readonly string[] Names =
+    {
+        "별", "하트", "스마일", "해", "구름", "번개", "꽃", "말풍선", "무지개", "체크", "엑스", "물음표", "느낌표", "음표", "왕관",
+    };
+
+    private static IBrush B(string c) => new SolidColorBrush(Color.Parse(c));
+    private static IPen P(string c, double w) => new Pen(B(c), w, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round);
+
+    private static void Glyph(DrawingContext dc, string text, string fill)
+    {
+        var ft = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+            new Typeface(FontFamily.Default, FontStyle.Normal, FontWeight.Black), 64, B(fill));
+        dc.DrawText(ft, new Point(50 - ft.Width / 2, 50 - ft.Height / 2));
+    }
+
     public static void Draw(int kind, DrawingContext dc, Rect r)
     {
         using var _ = dc.PushTransform(Matrix.CreateScale(r.Width / 100, r.Height / 100) * Matrix.CreateTranslation(r.X, r.Y));
+        var box = new Rect(0, 0, 100, 100);
         switch (kind)
         {
             case 0:
-                var star = Enumerable.Range(0, 10).Select(i =>
-                {
-                    var a = -Math.PI / 2 + i * Math.PI / 5;
-                    var k = i % 2 == 0 ? 46 : 20;
-                    return new Point(50 + Math.Cos(a) * k, 53 + Math.Sin(a) * k);
-                }).ToArray();
-                dc.DrawGeometry(B("#FFC83D"), P("#E09B00", 3), Poly(star));
+                dc.DrawGeometry(B("#FFC83D"), P("#E09B00", 3), Shapes2D.Build(13, box.Deflate(4)));
                 break;
             case 1:
-                dc.DrawGeometry(B("#F25C6E"), P("#C93347", 3), Geometry.Parse(
-                    "M50,90 C20,67 5,50 5,31 C5,16 17,6 30,6 C40,6 47,12 50,19 C53,12 60,6 70,6 C83,6 95,16 95,31 C95,50 80,67 50,90 Z"));
+                dc.DrawGeometry(B("#F25C6E"), P("#C93347", 3), Shapes2D.Build(15, box.Deflate(5)));
                 dc.DrawEllipse(B("#80FFFFFF"), null, new Point(28, 28), 8, 6);
                 break;
             case 2:
@@ -94,7 +225,7 @@ public static class Stickers
                 foreach (var (x, y, rr) in puffs) dc.DrawEllipse(B("#FFFFFF"), null, new Point(x, y), rr, rr);
                 break;
             case 5:
-                dc.DrawGeometry(B("#FFE14D"), P("#F2A900", 3), Geometry.Parse("M60,3 L18,56 H45 L36,97 L82,40 H54 Z"));
+                dc.DrawGeometry(B("#FFE14D"), P("#F2A900", 3), Shapes2D.Build(23, box.Deflate(6)));
                 break;
             case 6:
                 for (int i = 0; i < 5; i++)
@@ -105,10 +236,9 @@ public static class Stickers
                 dc.DrawEllipse(B("#FFD54A"), P("#E0A800", 2), new Point(50, 50), 15, 15);
                 break;
             case 7:
-                dc.DrawGeometry(B("#FFFFFF"), P("#333333", 3),
-                    Geometry.Parse("M14,8 H86 Q94,8 94,16 V60 Q94,68 86,68 H40 L22,90 L26,68 H14 Q6,68 6,60 V16 Q6,8 14,8 Z"));
+                dc.DrawGeometry(B("#FFFFFF"), P("#333333", 3), Shapes2D.Build(21, box.Deflate(6)));
                 break;
-            default:
+            case 8:
                 var cols = new[] { "#E53935", "#FB8C00", "#FDD835", "#43A047", "#1E88E5", "#8E24AA" };
                 for (int i = 0; i < cols.Length; i++)
                 {
@@ -117,11 +247,124 @@ public static class Stickers
                         FormattableString.Invariant($"M{50 - rr},80 A{rr},{rr} 0 0 1 {50 + rr},80")));
                 }
                 break;
+            case 9:
+                dc.DrawEllipse(B("#43A047"), null, new Point(50, 50), 45, 45);
+                dc.DrawGeometry(null, P("#FFFFFF", 10), Geometry.Parse("M27,52 L43,68 L74,34"));
+                break;
+            case 10:
+                dc.DrawEllipse(B("#E53935"), null, new Point(50, 50), 45, 45);
+                dc.DrawGeometry(null, P("#FFFFFF", 10), Geometry.Parse("M33,33 L67,67 M67,33 L33,67"));
+                break;
+            case 11:
+                dc.DrawEllipse(B("#1E88E5"), null, new Point(50, 50), 45, 45);
+                Glyph(dc, "?", "#FFFFFF");
+                break;
+            case 12:
+                dc.DrawGeometry(B("#FDD835"), P("#F2A900", 3), Geometry.Parse("M50,6 L96,90 H4 Z"));
+                Glyph(dc, "!", "#3B2F1E");
+                break;
+            case 13:
+                dc.DrawGeometry(B("#5E35B1"), null, Geometry.Parse("M38,18 L84,8 V68 A12,10 0 1 1 76,59 V28 L46,35 V78 A12,10 0 1 1 38,69 Z"));
+                break;
+            default:
+                dc.DrawGeometry(B("#FFC83D"), P("#C98A00", 3), Geometry.Parse("M10,78 L4,26 L30,48 L50,14 L70,48 L96,26 L90,78 Z"));
+                dc.DrawRectangle(B("#E0A800"), null, new Rect(10, 78, 80, 12));
+                foreach (var x in new[] { 30.0, 50, 70 }) dc.DrawEllipse(B("#E53935"), null, new Point(x, 64), 5, 5);
+                break;
         }
     }
 }
 
-/// <summary>Displays a sticker thumbnail.</summary>
+/// <summary>Procedural texture stickers (wood, grass, marble, metal, brick, water).</summary>
+public static class Textures
+{
+    public static readonly string[] Names = { "나무", "잔디", "대리석", "금속", "벽돌", "물" };
+    private static readonly Dictionary<int, WriteableBitmap> Cache = new();
+
+    private static double Hash(int x, int y, int s)
+    {
+        unchecked
+        {
+            uint h = (uint)(x * 374761393 + y * 668265263 + s * 2147483647);
+            h = (h ^ (h >> 13)) * 1274126177;
+            return ((h ^ (h >> 16)) & 0xffff) / 65535.0;
+        }
+    }
+
+    /// <summary>Value noise that repeats every (px, py) cells so textures tile seamlessly.</summary>
+    private static double Noise(double x, double y, int s, int px, int py)
+    {
+        int xi = (int)Math.Floor(x), yi = (int)Math.Floor(y);
+        double fx = x - xi, fy = y - yi;
+        double u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+        int W(int a, int p) => ((a % p) + p) % p;
+        double a = Hash(W(xi, px), W(yi, py), s), b = Hash(W(xi + 1, px), W(yi, py), s);
+        double c = Hash(W(xi, px), W(yi + 1, py), s), d = Hash(W(xi + 1, px), W(yi + 1, py), s);
+        return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+    }
+
+    /// <summary>Fractal noise over the unit square with integer base frequencies (tiles seamlessly).</summary>
+    private static double Fbm(double u, double v, int fx, int fy, int s)
+    {
+        double sum = 0, amp = 0.5;
+        for (int i = 0, f = 1; i < 5; i++, f *= 2)
+        {
+            sum += amp * Noise(u * fx * f, v * fy * f, s + i, fx * f, fy * f);
+            amp *= 0.5;
+        }
+        return sum;
+    }
+
+    private static (double, double, double) Mix((double, double, double) a, (double, double, double) b, double t) =>
+        (a.Item1 + (b.Item1 - a.Item1) * t, a.Item2 + (b.Item2 - a.Item2) * t, a.Item3 + (b.Item3 - a.Item3) * t);
+
+    public static unsafe WriteableBitmap Get(int kind)
+    {
+        if (Cache.TryGetValue(kind, out var cached)) return cached;
+        const int n = 256;
+        var bmp = new WriteableBitmap(new PixelSize(n, n), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul);
+        using (var fb = bmp.Lock())
+        {
+            for (int y = 0; y < n; y++)
+            {
+                var row = (byte*)fb.Address + y * fb.RowBytes;
+                for (int x = 0; x < n; x++)
+                {
+                    double u = x / (double)n, v = y / (double)n;
+                    (double r, double g, double b) c = kind switch
+                    {
+                        0 => Mix((0.55, 0.33, 0.16), (0.78, 0.55, 0.3), 0.5 + 0.5 * Math.Sin((v * 18 + Fbm(u, v, 4, 4, 1) * 6) * Math.PI)),
+                        1 => Mix((0.18, 0.45, 0.12), (0.45, 0.75, 0.25), Fbm(u, v, 10, 30, 2) * 0.7 + Noise(u * 80, v * 12, 3, 80, 12) * 0.5),
+                        2 => Mix((0.93, 0.93, 0.92), (0.45, 0.47, 0.5), Math.Pow(1 - Math.Abs(Math.Sin((u * 3 + v * 2 + Fbm(u, v, 3, 3, 4) * 3) * Math.PI)), 6)),
+                        3 => Mix((0.55, 0.57, 0.6), (0.85, 0.87, 0.9), Noise(u * 3, v * 200, 5, 3, 200) * 0.5 + Fbm(u, v, 2, 2, 6) * 0.6),
+                        4 => Brick(u, v),
+                        _ => Mix((0.05, 0.35, 0.65), (0.45, 0.8, 0.95), Math.Pow(0.5 + 0.5 * Math.Sin((u * 6 + Fbm(u, v, 3, 3, 7) * 4 + v * 2) * Math.PI), 3)),
+                    };
+                    row[x * 4 + 0] = (byte)(Math.Clamp(c.b, 0, 1) * 255);
+                    row[x * 4 + 1] = (byte)(Math.Clamp(c.g, 0, 1) * 255);
+                    row[x * 4 + 2] = (byte)(Math.Clamp(c.r, 0, 1) * 255);
+                    row[x * 4 + 3] = 255;
+                }
+            }
+        }
+        Cache[kind] = bmp;
+        return bmp;
+
+        static (double, double, double) Brick(double u, double v)
+        {
+            double rows = 8, cols = 4;
+            double ry = v * rows, row = Math.Floor(ry);
+            double rx = u * cols + (row % 2) * 0.5;
+            double fx = rx - Math.Floor(rx), fy = ry - row;
+            bool mortar = fx < 0.05 || fy < 0.1;
+            if (mortar) return (0.82, 0.8, 0.75);
+            double k = Hash((int)Math.Floor(rx) % 4, (int)row, 9) * 0.25 + Noise(u * 60, v * 60, 10, 60, 60) * 0.15;
+            return (0.62 + k, 0.25 + k * 0.4, 0.18 + k * 0.3);
+        }
+    }
+}
+
+/// <summary>Displays a sticker or texture thumbnail.</summary>
 public sealed class StickerView : Control
 {
     public int Kind { get; init; }

@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Controls.Presenters;
+using Avalonia.Controls.Primitives;
 using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
 using Avalonia.Styling;
@@ -102,6 +103,10 @@ public sealed class App : Application
         {
             Source = new Uri("avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml"),
         });
+        // one UI font for windows and popups (flyouts, menus, tooltips)
+        var uiFont = new FontFamily("Noto Sans CJK KR, Noto Sans KR, NanumGothic, Ubuntu, DejaVu Sans");
+        Styles.Add(new Style(x => x.OfType<Window>()) { Setters = { new Setter(TemplatedControl.FontFamilyProperty, uiFont) } });
+        Styles.Add(new Style(x => x.OfType<Avalonia.Controls.Primitives.PopupRoot>()) { Setters = { new Setter(TemplatedControl.FontFamilyProperty, uiFont) } });
         // toolbar buttons stay flat when disabled (Paint 3D style)
         Styles.Add(new Style(x => x.OfType<Button>().Class("top").Class(":disabled").Template().OfType<ContentPresenter>().Name("PART_ContentPresenter"))
         {

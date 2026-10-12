@@ -3,3 +3,6 @@ app/bin/
 app/obj/
 build/
 dist/
+uitest/bin/
+uitest/obj/
+build-uitest/
