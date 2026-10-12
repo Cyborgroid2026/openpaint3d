@@ -1,0 +1,5 @@
+engine/target/
+app/bin/
+app/obj/
+build/
+dist/
