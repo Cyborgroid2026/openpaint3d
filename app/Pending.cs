@@ -207,6 +207,8 @@ public sealed class TextItem : Pending2D
     public TextAlignment Align = TextAlignment.Left;
     public Color Color;
     public bool Is3D;
+    public bool FillBg;
+    public Color BgColor;
 
     public override Label Label => Label.Text;
 
@@ -220,6 +222,8 @@ public sealed class TextItem : Pending2D
         Align = s.Align;
         Color = s.Color;
         Is3D = s.Text3D;
+        FillBg = s.TextBg && !s.Text3D;
+        BgColor = s.TextBgColor;
         Finish = s.Finish;
     }
 
@@ -245,5 +249,26 @@ public sealed class TextItem : Pending2D
         Box = new Rect(Box.X, Box.Y, Box.Width, Math.Max(Box.Height, ft.Height + 8));
     }
 
-    public override void Draw(DrawingContext dc, Rect box) => dc.DrawText(Format(box.Width - 8), box.TopLeft + new Vector(4, 4));
+    public override void Draw(DrawingContext dc, Rect box)
+    {
+        if (FillBg) dc.FillRectangle(new SolidColorBrush(BgColor), box);
+        dc.DrawText(Format(box.Width - 8), box.TopLeft + new Vector(4, 4));
+    }
+}
+
+/// <summary>
+/// Part of the canvas picked up with the select tool (or pasted pixels). A lifted selection has
+/// already left a transparent hole in its own history step, so dropping it adds no new step.
+/// </summary>
+public sealed class SelectionItem : Pending2D
+{
+    public required IImage Image;
+    public bool Lifted;
+    /// <summary>History step of the lift, to tell whether a stamp came after it.</summary>
+    public ulong LiftedAt;
+
+    public override Label Label => Lifted ? Label.None : Label.Paste;
+    public override double Pad => 0;
+
+    public override void Draw(DrawingContext dc, Rect box) => dc.DrawImage(Image, new Rect(Image.Size), box);
 }

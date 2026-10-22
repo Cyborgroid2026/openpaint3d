@@ -30,6 +30,22 @@ public static class Export
 
     // ---------------------------------------------------------------- images
 
+    /// <summary>The picture centred on one A4 page (portrait or landscape) with a 10 mm margin.</summary>
+    public static void SavePdf(Engine e, string path, bool landscape)
+    {
+        float pw = landscape ? 842 : 595, ph = landscape ? 595 : 842, margin = 28;
+        using var img = e.Snapshot(forceOpaque: true);
+        using var stream = File.Create(path);
+        using var doc = SKDocument.CreatePdf(stream);
+        var canvas = doc.BeginPage(pw, ph);
+        float k = Math.Min((pw - 2 * margin) / img.Width, (ph - 2 * margin) / img.Height);
+        float w = img.Width * k, h = img.Height * k;
+        using var paint = new SKPaint { FilterQuality = SKFilterQuality.High };
+        canvas.DrawImage(img, SKRect.Create((pw - w) / 2, (ph - h) / 2, w, h), paint);
+        doc.EndPage();
+        doc.Close();
+    }
+
     public static void SaveImage(Engine e, string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();

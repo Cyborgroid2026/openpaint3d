@@ -62,6 +62,8 @@ struct Snap {
     objs: Vec<Obj>,
     view: View,
     label: u32,
+    /// identity of the history step (stays with it through undo / redo)
+    serial: u64,
 }
 
 struct Stroke {
@@ -117,6 +119,10 @@ pub struct Doc {
     builder: Vec<Part>,
     out_f32: Vec<f32>,
     out_u8: Vec<u8>,
+    perspective: bool,
+    serial: u64,
+    /// copied 3D objects (survive deleting the originals, as after "cut")
+    clip: Vec<Obj>,
 }
 
 fn over(dst: &mut [u8], c: [f32; 3], a: f32) {
@@ -191,6 +197,9 @@ impl Doc {
             builder: Vec::new(),
             out_f32: Vec::new(),
             out_u8: Vec::new(),
+            perspective: true,
+            serial: 0,
+            clip: Vec::new(),
         }
     }
 
@@ -220,6 +229,8 @@ impl Doc {
     }
 
     fn resized(&mut self) {
+        // a dirty rectangle left from the old size may reach past the new edges
+        self.dirty = None;
         self.disp = vec![0; self.w * self.h * 4];
         self.layer_ss = 0;
         self.scene_changed();
@@ -228,11 +239,13 @@ impl Doc {
     // ------------------------------------------------------------- history
 
     fn snap(&self, label: u32) -> Snap {
-        Snap { w: self.w, h: self.h, px: self.px.clone(), objs: self.objs.clone(), view: self.view, label }
+        Snap { w: self.w, h: self.h, px: self.px.clone(), objs: self.objs.clone(), view: self.view, label, serial: 0 }
     }
 
     fn push_undo(&mut self, label: u32) {
-        let s = self.snap(label);
+        let mut s = self.snap(label);
+        self.serial += 1;
+        s.serial = self.serial;
         self.undo.push(s);
         if self.undo.len() > MAX_UNDO {
             self.undo.remove(0);
@@ -257,7 +270,7 @@ impl Doc {
     fn undo(&mut self) -> bool {
         match self.undo.pop() {
             Some(s) => {
-                let cur = self.snap(s.label);
+                let cur = Snap { serial: s.serial, ..self.snap(s.label) };
                 self.redo.push(cur);
                 self.restore(s);
                 true
@@ -269,7 +282,7 @@ impl Doc {
     fn redo(&mut self) -> bool {
         match self.redo.pop() {
             Some(s) => {
-                let cur = self.snap(s.label);
+                let cur = Snap { serial: s.serial, ..self.snap(s.label) };
                 self.undo.push(cur);
                 self.restore(s);
                 true
@@ -497,7 +510,13 @@ impl Doc {
     /// Composite a premultiplied BGRA image (text, stickers, 2D shapes).
     #[allow(clippy::too_many_arguments)]
     fn blend_bgra(&mut self, src: &[u8], sw: usize, sh: usize, dx: i32, dy: i32, opacity: f32, finish: u32, label: u32) {
-        self.push_undo(label);
+        // label 0 continues the previous step (dropping a lifted selection back onto the canvas);
+        // it is still an edit, so whatever could be redone is gone
+        if label != 0 {
+            self.push_undo(label);
+        } else {
+            self.redo.clear();
+        }
         // height field from blurred alpha for glossy / metallic finishes
         let heights = if finish != scene::FINISH_MATTE {
             let mut a: Vec<f32> = (0..sw * sh).map(|i| src[i * 4 + 3] as f32 / 255.0).collect();
@@ -860,7 +879,7 @@ impl Doc {
         let mut id = vec![0u32; sw * sh];
         let plane_mesh = mesh::canvas_quad(self.w as f32, self.h as f32);
         let plane = Plane { mesh: &plane_mesh, tex: &tex, tw: self.w, th: self.h };
-        let cam = Camera::orbit(self.w as f32, self.h as f32, yaw, pitch, zoom, sw as f32, sh as f32);
+        let cam = Camera::orbit(self.w as f32, self.h as f32, yaw, pitch, zoom, sw as f32, sh as f32, self.perspective);
         let mut t = Target { w: sw, h: sh, y0: 0, color: &mut color, depth: &mut depth, id: &mut id };
         scene::render(&self.objs, &cam, &self.view.light(), Some(&plane), &mut t);
         let k = 1.0 / (ss * ss) as f32;
@@ -918,7 +937,7 @@ impl Doc {
         let u32w = |b: &mut Vec<u8>, v: u32| b.extend_from_slice(&v.to_le_bytes());
         let f32w = |b: &mut Vec<u8>, v: f32| b.extend_from_slice(&v.to_le_bytes());
         b.extend_from_slice(b"OP3D");
-        u32w(&mut b, 1);
+        u32w(&mut b, 2);
         u32w(&mut b, self.w as u32);
         u32w(&mut b, self.h as u32);
         b.extend_from_slice(&self.px);
@@ -947,6 +966,7 @@ impl Doc {
                 f32w(&mut b, f);
             }
             u32w(&mut b, o.finish);
+            u32w(&mut b, o.group);
             u32w(&mut b, o.parts.len() as u32);
             for p in o.parts.iter() {
                 for row in p.m.0 {
@@ -1001,7 +1021,11 @@ impl Doc {
         }
         let parse = |d: &[u8]| -> Option<(usize, usize, Vec<u8>, View, u32, Vec<Obj>)> {
             let mut r = R { d, p: 0 };
-            if r.bytes(4)? != b"OP3D" || r.u()? != 1 {
+            if r.bytes(4)? != b"OP3D" {
+                return None;
+            }
+            let version = r.u()?;
+            if version != 1 && version != 2 {
                 return None;
             }
             let (w, h) = (r.u()? as usize, r.u()? as usize);
@@ -1034,6 +1058,7 @@ impl Doc {
                 let scale = v3(r.f()?, r.f()?, r.f()?);
                 let color = [r.f()?, r.f()?, r.f()?];
                 let finish = r.u()?;
+                let group = if version >= 2 { r.u()? } else { 0 };
                 let np = r.u()? as usize;
                 let mut parts = Vec::with_capacity(np.min(1000));
                 for _ in 0..np {
@@ -1061,7 +1086,7 @@ impl Doc {
                     }
                     parts.push(Part { mesh: Arc::new(mesh), m: M3(m), off, color: if c[0] < 0.0 { None } else { Some(c) } });
                 }
-                objs.push(Obj { id, parts: Arc::new(parts), pos, rot: M3(rot), scale, color, finish });
+                objs.push(Obj { id, parts: Arc::new(parts), pos, rot: M3(rot), scale, color, finish, group });
             }
             Some((w, h, px, view, next_id, objs))
         };
@@ -1254,6 +1279,26 @@ pub unsafe extern "C" fn op3d_redo(c: *mut Doc) -> i32 {
     d(c).map_or(0, |c| c.redo() as i32)
 }
 
+/// Serial of the newest undo step (0 when there is none); unlike the count it changes
+/// even when the history is full and old steps fall off.
+#[no_mangle]
+pub unsafe extern "C" fn op3d_history_serial(c: *mut Doc) -> u64 {
+    d(c).and_then(|c| c.undo.last()).map_or(0, |s| s.serial)
+}
+
+/// Undo the last step without making it redoable (cancelling a lifted selection).
+#[no_mangle]
+pub unsafe extern "C" fn op3d_undo_discard(c: *mut Doc) -> i32 {
+    let Some(c) = d(c) else { return 0 };
+    match c.undo.pop() {
+        Some(s) => {
+            c.restore(s);
+            1
+        }
+        None => 0,
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn op3d_undo_count(c: *mut Doc) -> i32 {
     d(c).map_or(0, |c| c.undo.len() as i32)
@@ -1339,6 +1384,7 @@ pub unsafe extern "C" fn op3d_obj_commit(c: *mut Doc, t: *const f32, color: u32,
         scale: v3(t[3], t[4], t[5]),
         color: col,
         finish,
+        group: 0,
     });
     c.scene_changed();
     id
@@ -1396,7 +1442,7 @@ pub unsafe extern "C" fn op3d_obj_duplicate(c: *mut Doc, id: u32) -> u32 {
     c.push_undo(7);
     let nid = c.next_id;
     c.next_id += 1;
-    c.objs.push(Obj { id: nid, pos: src.pos + v3(30.0, 30.0, 0.0), ..src });
+    c.objs.push(Obj { id: nid, pos: src.pos + v3(30.0, 30.0, 0.0), group: 0, ..src });
     c.scene_changed();
     nid
 }
@@ -1430,6 +1476,142 @@ pub unsafe extern "C" fn op3d_obj_pick(c: *mut Doc, x: i32, y: i32) -> u32 {
     let ss = c.layer_ss.max(1);
     c.ensure_layer(ss);
     c.layer_id.get(y as usize * c.w + x as usize).copied().unwrap_or(0)
+}
+
+/// Rotate around a world axis through (cx, cy, cz), moving the object's position too
+/// (used to turn several selected objects as one).
+#[no_mangle]
+pub unsafe extern "C" fn op3d_obj_rotate_about(c: *mut Doc, id: u32, axis: u32, deg: f32, cx: f32, cy: f32, cz: f32) {
+    if let Some(c) = d(c) {
+        if let Some(o) = c.obj_mut(id) {
+            let r = M3::rot_axis(axis, deg);
+            let centre = v3(cx, cy, cz);
+            o.rot = r.mul(&o.rot);
+            o.pos = r.apply(o.pos - centre) + centre;
+            c.scene_changed();
+        }
+    }
+}
+
+/// Copy of an object offset by (dx, dy), without a history step (the caller checkpoints).
+#[no_mangle]
+pub unsafe extern "C" fn op3d_obj_clone(c: *mut Doc, id: u32, dx: f32, dy: f32, group: u32) -> u32 {
+    let Some(c) = d(c) else { return 0 };
+    let Some(src) = c.objs.iter().find(|o| o.id == id).cloned() else { return 0 };
+    let nid = c.next_id;
+    c.next_id += 1;
+    c.objs.push(Obj { id: nid, pos: src.pos + v3(dx, dy, 0.0), group, ..src });
+    c.scene_changed();
+    nid
+}
+
+/// Remove an object without a history step (the caller checkpoints).
+#[no_mangle]
+pub unsafe extern "C" fn op3d_obj_remove(c: *mut Doc, id: u32) -> i32 {
+    let Some(c) = d(c) else { return 0 };
+    let n = c.objs.len();
+    c.objs.retain(|o| o.id != id);
+    c.scene_changed();
+    (c.objs.len() != n) as i32
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn op3d_obj_set_group(c: *mut Doc, id: u32, group: u32) {
+    if let Some(c) = d(c) {
+        if let Some(o) = c.obj_mut(id) {
+            o.group = group;
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn op3d_obj_group(c: *mut Doc, id: u32) -> u32 {
+    d(c).and_then(|c| c.objs.iter().find(|o| o.id == id)).map_or(0, |o| o.group)
+}
+
+/// Ids of all objects in back-to-front creation order; returns the count written (at most `max`).
+#[no_mangle]
+pub unsafe extern "C" fn op3d_obj_ids(c: *mut Doc, out: *mut u32, max: i32) -> i32 {
+    let Some(c) = d(c) else { return 0 };
+    if out.is_null() || max <= 0 {
+        return c.objs.len() as i32;
+    }
+    let out = slice::from_raw_parts_mut(out, max as usize);
+    for (slot, o) in out.iter_mut().zip(&c.objs) {
+        *slot = o.id;
+    }
+    c.objs.len().min(max as usize) as i32
+}
+
+/// Make a rectangle of the canvas transparent (lifting a 2D selection); records history when `label` is set.
+#[no_mangle]
+pub unsafe extern "C" fn op3d_clear_rect(c: *mut Doc, x: i32, y: i32, w: i32, h: i32, label: u32) {
+    let Some(c) = d(c) else { return };
+    let Some(r) = c.clip(x as f32, y as f32, (x + w - 1) as f32, (y + h - 1) as f32) else { return };
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    if label != 0 {
+        c.push_undo(label);
+    }
+    for yy in r.y0..=r.y1 {
+        let row = (yy * c.w + r.x0) * 4;
+        c.px[row..row + (r.x1 - r.x0 + 1) * 4].fill(0);
+    }
+    c.mark(r);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn op3d_clip_clear(c: *mut Doc) {
+    if let Some(c) = d(c) {
+        c.clip.clear();
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn op3d_clip_add(c: *mut Doc, id: u32) {
+    if let Some(c) = d(c) {
+        if let Some(o) = c.objs.iter().find(|o| o.id == id).cloned() {
+            c.clip.push(o);
+        }
+    }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn op3d_clip_count(c: *mut Doc) -> i32 {
+    d(c).map_or(0, |c| c.clip.len() as i32)
+}
+
+/// Add copies of the clipboard objects offset by (dx, dy) with fresh ids and groups, without a
+/// history step. The new objects are the last `count` ids of `op3d_obj_ids`.
+#[no_mangle]
+pub unsafe extern "C" fn op3d_clip_paste(c: *mut Doc, dx: f32, dy: f32) -> i32 {
+    let Some(c) = d(c) else { return 0 };
+    let mut next_group = c.objs.iter().map(|o| o.group).max().unwrap_or(0) + 1;
+    let mut remap: Vec<(u32, u32)> = Vec::new();
+    for o in c.clip.clone() {
+        let group = if o.group == 0 {
+            0
+        } else if let Some(&(_, g)) = remap.iter().find(|(old, _)| *old == o.group) {
+            g
+        } else {
+            remap.push((o.group, next_group));
+            next_group += 1;
+            next_group - 1
+        };
+        let id = c.next_id;
+        c.next_id += 1;
+        c.objs.push(Obj { id, pos: o.pos + v3(dx, dy, 0.0), group, ..o });
+    }
+    c.scene_changed();
+    c.clip.len() as i32
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn op3d_set_perspective(c: *mut Doc, on: i32) {
+    if let Some(c) = d(c) {
+        c.perspective = on != 0;
+    }
 }
 
 #[no_mangle]
@@ -1657,5 +1839,56 @@ mod tests {
             c.undo();
             assert_eq!(op3d_history_label(&mut c, 1, 0), 7);
         }
+    }
+
+    #[test]
+    fn undoing_several_size_changes_before_display_does_not_overrun() {
+        let mut c = Doc::new(40, 30);
+        c.crop(0, 0, 60, 30);
+        unsafe { op3d_display(&mut c, 1) };
+        c.fill(50, 5, 0xFF0000FF, 0);
+        assert!(c.undo() && c.undo());
+        assert_eq!(c.w, 40);
+        unsafe { op3d_display(&mut c, 1) };
+    }
+
+    #[test]
+    fn groups_clear_rect_and_project_v2() {
+        let mut c = Doc::new(40, 40);
+        c.fill(0, 0, 0x00FF00FF, 0);
+        let a = add_cube(&mut c);
+        unsafe {
+            let b = op3d_obj_clone(&mut c, a, 5.0, 0.0, 0);
+            op3d_obj_set_group(&mut c, a, 3);
+            op3d_obj_set_group(&mut c, b, 3);
+            let mut ids = [0u32; 4];
+            assert_eq!(op3d_obj_ids(&mut c, ids.as_mut_ptr(), 4), 2);
+            assert_eq!(ids[..2], [a, b]);
+            op3d_obj_rotate_about(&mut c, b, 2, 180.0, 0.0, 0.0, 0.0);
+            assert!(c.objs[1].pos.x < 0.0);
+            op3d_clear_rect(&mut c, 2, 2, 4, 4, 18);
+        }
+        assert_eq!((px(&c, 3, 3)[3], px(&c, 10, 10)[3]), (0, 255));
+        c.save();
+        let data = c.out_u8.clone();
+        let mut e = Doc::new(1, 1);
+        assert!(e.load(&data));
+        assert_eq!((e.objs.len(), e.objs[0].group, e.objs[1].group), (2, 3, 3));
+        let lift = unsafe { op3d_history_serial(&mut c) };
+        assert!(c.undo() && c.redo());
+        assert_eq!(unsafe { op3d_history_serial(&mut c) }, lift, "a step keeps its serial through undo/redo");
+        let redo = c.redo.len();
+        unsafe { assert_eq!(op3d_undo_discard(&mut c), 1) };
+        assert_eq!((px(&c, 3, 3)[3], c.redo.len()), (255, redo));
+        unsafe {
+            op3d_clip_add(&mut c, a);
+            op3d_clip_add(&mut c, c.objs[1].id);
+            assert_eq!(op3d_obj_remove(&mut c, a), 1);
+            assert_eq!(c.objs.len(), 1);
+            assert_eq!(op3d_clip_paste(&mut c, 10.0, 0.0), 2);
+        }
+        assert_eq!(c.objs.len(), 3);
+        assert_eq!(c.objs[1].group, c.objs[2].group);
+        assert!(c.objs[1].group != 0 && c.objs[1].group != c.objs[0].group, "pasted group gets a fresh id");
     }
 }

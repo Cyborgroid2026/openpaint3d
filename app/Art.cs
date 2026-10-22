@@ -33,6 +33,9 @@ public static class Icons
     public const string SaveAs = "M4,4 H17 L20,7 V13 M4,4 V20 H11 M8,4 V9 H15 V4 M14,20 L20,14 L22,16 L16,22 H14 Z";
     public const string Info = "M12,2 A10,10 0 1 0 12,22 A10,10 0 1 0 12,2 Z M12,10 V17 M12,7 V7.5";
     public const string Exit = "M14,4 H20 V20 H14 M10,8 L6,12 L10,16 M6,12 H16";
+    public const string Print = "M7,9 V4 H17 V9 M6,17 H4 V10 H20 V17 H18 M7,14 H17 V20 H7 Z";
+    public const string Print3D = "M4,20 H20 M6,20 V8 H18 V20 M9,8 V5 H15 V8 M12,11 L9,13 V17 L12,19 L15,17 V13 Z";
+    public const string MakeSticker = "M5,5 H19 V13 L13,19 H5 Z M13,19 V13 H19";
     public const string Crop = "M6,2 V18 H22 M2,6 H18 V22";
     public const string Trash = "M4,6 H20 M9,6 V3 H15 V6 M6,6 L7,21 H17 L18,6 M10,10 V17 M14,10 V17";
     public const string Copy = "M8,8 H20 V20 H8 Z M4,16 V4 H16";

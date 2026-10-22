@@ -9,6 +9,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using OpenPaint3D;
+using Vector3D = OpenPaint3D.Vector3D;
 
 var outDir = args.Length > 0 ? args[0] : "shots";
 Directory.CreateDirectory(outDir);
@@ -279,6 +280,119 @@ using (var e2 = new Engine(10, 10))
 int undos = 0;
 while (engine.Undo()) undos++;
 Check(undos > 15 && engine.ObjectCount == 0, $"undo walks back through history ({undos} steps)");
+
+
+// ---------------------------------------------------------------------------
+// Paint 3D keyboard shortcuts, 2D selection, multi-select / groups, print
+{
+bool MenuOpen() => ((Border)typeof(MainWindow).GetField("_menu", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(w)!).IsVisible;
+void K(Avalonia.Input.Key k, RawInputModifiers m = RawInputModifiers.None) { w.KeyPress(k, m, PhysicalKey.None, null); w.KeyRelease(k, m, PhysicalKey.None, null); Pump(); }
+const RawInputModifiers C = RawInputModifiers.Control, SH = RawInputModifiers.Shift;
+string Focused() => w.FocusManager?.GetFocusedElement()?.GetType().Name ?? "null";
+void Stroke() => Drag(Canvas(200, 200), Canvas(600, 300));
+// start from plain tools: the walkthrough above left the oil brush and 3D text on
+S.Brush = 0;
+S.Text3D = false;
+Click(Text("브러시"));
+Console.WriteLine("-- 기본 단축키");
+Stroke(); int u = engine.UndoCount; K(Avalonia.Input.Key.Z, C); Check(engine.UndoCount == u - 1, "Ctrl+Z"); K(Avalonia.Input.Key.Y, C); Check(engine.UndoCount == u, "Ctrl+Y");
+double z = surface.Zoom; K(Avalonia.Input.Key.PageUp, C); Check(surface.Zoom > z, "Ctrl+PgUp 확대");
+z = surface.Zoom; K(Avalonia.Input.Key.PageDown, C); Check(surface.Zoom < z, "Ctrl+PgDn 축소");
+double bs = S.BrushSize; z = surface.Zoom; K(Avalonia.Input.Key.OemPlus, C); Check(S.BrushSize > bs && surface.Zoom == z, $"Ctrl++ 브러시 크게 {bs}->{S.BrushSize}");
+bs = S.BrushSize; K(Avalonia.Input.Key.Subtract, C); Check(S.BrushSize < bs, $"Ctrl+숫자패드- 브러시 작게 {bs}->{S.BrushSize}");
+K(Avalonia.Input.Key.D3, C); Check(S.View3D, "Ctrl+3 3D 보기 켜기");
+K(Avalonia.Input.Key.E, C | SH); Check(!S.Perspective, "Ctrl+Shift+E 원근감 끄기"); Pump(); K(Avalonia.Input.Key.E, C | SH);
+K(Avalonia.Input.Key.D3, C); Check(!S.View3D, "Ctrl+3 3D 보기 끄기");
+K(Avalonia.Input.Key.I); Check(S.Picking, "I 스포이드"); K(Avalonia.Input.Key.Escape); Check(!S.Picking, "Esc 스포이드 해제");
+var side = w.GetVisualDescendants().OfType<Border>().First(b => b.Child is ScrollViewer); K(Avalonia.Input.Key.M); Check(!side.IsVisible, "M 패널 숨기기"); K(Avalonia.Input.Key.M); Check(side.IsVisible, "M 패널 표시");
+K(Avalonia.Input.Key.X, C | SH); Check(S.CropMode, "Ctrl+Shift+X 자르기"); K(Avalonia.Input.Key.Escape); Check(!S.CropMode, "Esc 자르기 취소");
+K(Avalonia.Input.Key.E, C); Check(S.Tool == Tool.Canvas, "Ctrl+E 캔버스");
+K(Avalonia.Input.Key.P, C); Check(MenuOpen(), "Ctrl+P 인쇄 메뉴"); K(Avalonia.Input.Key.Escape);
+// Hangul IME: key reported as ImeProcessed, physical key Z
+u = engine.UndoCount; w.KeyPress(Avalonia.Input.Key.ImeProcessed, C, PhysicalKey.Z, null); w.KeyRelease(Avalonia.Input.Key.ImeProcessed, C, PhysicalKey.Z, null); Pump(); Check(engine.UndoCount == u - 1, "한글 입력 상태(ImeProcessed)에서도 Ctrl+Z");
+K(Avalonia.Input.Key.Y, C);
+// wheel zoom
+Click(Text("브러시")); z = surface.Zoom; var mid = Canvas(900, 500); w.MouseWheel(mid, new Vector(0, 1)); Pump(); Check(surface.Zoom > z, "마우스 휠 확대");
+w.MouseWheel(mid, new Vector(0, -1)); Pump(); K(Avalonia.Input.Key.D0, C);
+
+Console.WriteLine("-- 3D 개체: 복사/잘라내기/붙여넣기/다중 선택/그룹");
+Click(Text("3D 셰이프")); Click(Tip("정육면체")); Drag(Canvas(800, 500), Canvas(1000, 700));
+var a = surface.Selected; int n = engine.ObjectCount;
+K(Avalonia.Input.Key.C, C); Pump(8); K(Avalonia.Input.Key.V, C); Pump(8); Check(engine.ObjectCount == n + 1, $"Ctrl+C → Ctrl+V 개체 ({n}->{engine.ObjectCount})");
+var b = surface.Selected; Check(b != a, "붙여넣은 개체가 선택됨");
+n = engine.ObjectCount; K(Avalonia.Input.Key.X, C); Pump(8); Check(engine.ObjectCount == n - 1 && surface.Selected == 0, "Ctrl+X 잘라내기");
+K(Avalonia.Input.Key.V, C); Pump(8); Check(engine.ObjectCount == n, "잘라낸 개체 붙여넣기"); b = surface.Selected;
+var pos = engine.Info(b)!.Value.Pos; K(Avalonia.Input.Key.Right); K(Avalonia.Input.Key.Down, SH); var p2 = engine.Info(b)!.Value.Pos; Check(p2.X == pos.X + 1 && p2.Y == pos.Y + 10, "방향키 1px / Shift 10px 이동");
+K(Avalonia.Input.Key.A, C); Check(surface.SelectedIds.Count == engine.ObjectCount, $"Ctrl+A 개체 모두 선택 ({surface.SelectedIds.Count})");
+var before = engine.ObjectIds().ToDictionary(i => i, i => engine.Info(i)!.Value.Pos);
+var gi = surface.SelectionInfo()!.Value; var gc = Canvas(gi.Screen.Center.X, gi.Screen.Center.Y);
+var ownHit = engine.Info(a)!.Value.Screen.Center; Drag(Canvas(ownHit.X, ownHit.Y), Canvas(ownHit.X + 50, ownHit.Y));
+Check(engine.ObjectIds().All(i => Math.Abs(engine.Info(i)!.Value.Pos.X - before[i].X - 50) < 1), "여러 개체를 함께 끌어 옮김");
+K(Avalonia.Input.Key.G, C); Check(engine.Group(a) != 0 && engine.Group(a) == engine.Group(b), "Ctrl+G 그룹");
+K(Avalonia.Input.Key.Escape); Click(Canvas(ownHit.X + 50, ownHit.Y)); Check(surface.SelectedIds.Count == 2, $"그룹 개체 하나를 누르면 그룹 전체 선택 ({surface.SelectedIds.Count})");
+K(Avalonia.Input.Key.G, C | SH); Check(engine.Group(a) == 0, "Ctrl+Shift+G 그룹 해제");
+K(Avalonia.Input.Key.Escape); { var ii = engine.Info(b)!.Value; engine.SetObject(b, new OpenPaint3D.Vector3D(ii.Pos.X + 400, ii.Pos.Y, ii.Pos.Z), ii.Scale); surface.Refresh(); }
+var ia = engine.Info(a)!.Value.Screen.Center; var ib = engine.Info(b)!.Value.Screen.Center;
+Click(Canvas(ia.X, ia.Y)); w.MouseMove(Canvas(ib.X, ib.Y)); w.MouseDown(Canvas(ib.X, ib.Y), MouseButton.Left, C); w.MouseUp(Canvas(ib.X, ib.Y), MouseButton.Left, C); Pump();
+Check(surface.SelectedIds.Count == 2, "Ctrl+클릭 다중 선택");
+n = engine.ObjectCount; K(Avalonia.Input.Key.D, C); Check(engine.ObjectCount == n + 2, "Ctrl+D 선택한 것 모두 복제");
+n = engine.ObjectCount; u = engine.UndoCount; K(Avalonia.Input.Key.Delete); Check(engine.ObjectCount == n - 2 && engine.UndoCount == u + 1, "Delete 여러 개 한 번에(실행 취소 1단계)");
+K(Avalonia.Input.Key.Z, C); Check(engine.ObjectCount == n, "삭제 실행 취소");
+foreach (var id in engine.ObjectIds()) { surface.Select(id); surface.DeleteSelection(); }
+
+Console.WriteLine("-- 2D 영역 선택");
+Click(Text("브러시")); S.Color = Avalonia.Media.Color.Parse("#FF0000"); S.BrushSize = 40; Drag(Canvas(200, 200), Canvas(400, 200));
+Click(Text("선택")); Drag(Canvas(150, 150), Canvas(450, 250));
+Check(surface.Pending is SelectionItem, "끌어서 영역 선택");
+Check(engine.Pick(new Point(300, 200)) is not { A: > 0 } || engine.Pick(new Point(300, 200))!.Value == Avalonia.Media.Color.Parse("#FFFFFF"), "선택한 자리는 비워짐");
+var lifted = surface.Pending!.Box; Drag(Canvas(300, 200), Canvas(300, 600));
+Check(Math.Abs(surface.Pending!.Box.Y - lifted.Y - 400) < 1, "선택 영역 끌어 옮기기");
+K(Avalonia.Input.Key.Enter); Check(surface.Pending == null && engine.Pick(new Point(300, 600))?.R == 255 && engine.Pick(new Point(300, 600))?.G == 0, "Enter로 내려놓기");
+u = engine.UndoCount; K(Avalonia.Input.Key.Z, C); Check(engine.Pick(new Point(300, 200))?.G == 0, "실행 취소 한 번에 원래 자리로");
+Drag(Canvas(150, 150), Canvas(450, 250)); K(Avalonia.Input.Key.C, C); Pump(8); K(Avalonia.Input.Key.Escape);
+K(Avalonia.Input.Key.V, C); Pump(8); Check(surface.Pending is SelectionItem { Lifted: false }, "2D 복사 → 붙여넣기");
+K(Avalonia.Input.Key.Escape); int und = engine.UndoCount;
+Drag(Canvas(150, 150), Canvas(450, 250)); K(Avalonia.Input.Key.Z, C); Check(surface.Pending == null && engine.Pick(new Point(300, 200))?.G == 0 && engine.RedoCount == 0 || engine.UndoCount == und, "선택 후 Ctrl+Z는 선택 취소(그림 복구)");
+Drag(Canvas(150, 150), Canvas(450, 250)); K(Avalonia.Input.Key.Delete); Check(surface.Pending == null && engine.Pick(new Point(300, 200)) is not { R: 255, G: 0 }, "Delete로 선택 영역 지우기");
+K(Avalonia.Input.Key.Z, C);
+K(Avalonia.Input.Key.A, C); Check(surface.Pending is SelectionItem && surface.Pending.Box.Width == engine.Width, "개체 없을 때 Ctrl+A = 캔버스 전체 선택"); K(Avalonia.Input.Key.Escape);
+
+// stamp a lifted selection, then undo: the stamp goes, the selection keeps floating; undo again restores
+for (int i = 0; i < 45; i++) engine.Checkpoint(OpenPaint3D.Label.Brush);   // history full: counts stop changing
+Drag(Canvas(150, 150), Canvas(450, 250));
+surface.StampPending(); Pump();
+K(Avalonia.Input.Key.Z, C); Check(surface.Pending is SelectionItem, "스탬프 뒤 Ctrl+Z: 스탬프만 취소, 선택은 유지 (기록이 가득 찬 상태)");
+K(Avalonia.Input.Key.Z, C); Check(surface.Pending == null && engine.Pick(new Point(300, 200))?.G == 0, "한 번 더 Ctrl+Z: 원래 그림으로");
+// history flyout commits a floating selection first
+Drag(Canvas(150, 150), Canvas(450, 250)); Click(Text("기록")); Check(surface.Pending == null, "기록 열면 떠 있는 선택을 먼저 내려놓음"); K(Avalonia.Input.Key.Escape);
+Console.WriteLine("-- 포커스");
+Click(Text("브러시"));
+var box = w.GetVisualDescendants().OfType<TextBox>().First(t => t.IsEffectivelyVisible);
+Click(box.TranslatePoint(new Point(10, 10), w)!.Value); w.KeyTextInput("30"); K(Avalonia.Input.Key.Enter); Pump(6);
+Check(S.BrushSize == 30, $"두께 칸 클릭 후 입력하면 값이 바뀜 (두께 {S.BrushSize}, 칸 '{box.Text}')");
+Stroke(); Click(box.TranslatePoint(new Point(10, 10), w)!.Value); K(Avalonia.Input.Key.Enter); Pump(6);
+u = engine.UndoCount; K(Avalonia.Input.Key.Z, C); Check(engine.UndoCount == u - 1, $"Enter 뒤 단축키 다시 동작 (포커스 {Focused()})");
+var combo = w.GetVisualDescendants().OfType<ComboBox>().First(c => c.IsEffectivelyVisible);
+Click(combo.TranslatePoint(new Point(20, 10), w)!.Value); Pump(); Check(combo.IsDropDownOpen, "재질 콤보 클릭하면 목록 열림"); K(Avalonia.Input.Key.Escape); combo.IsDropDownOpen = false; Pump();
+int fin = combo.SelectedIndex; K(Avalonia.Input.Key.Down); Check(combo.SelectedIndex == fin, $"↓ 키가 재질을 바꾸지 않음 (포커스 {Focused()})");
+
+Console.WriteLine("-- 텍스트");
+Click(Text("텍스트")); Drag(Canvas(300, 700), Canvas(800, 800)); w.KeyTextInput("가나다"); Pump();
+bool b0 = S.Bold; K(Avalonia.Input.Key.B, C); Check(S.Bold != b0 && ((TextItem)surface.Pending!).Bold == S.Bold, "Ctrl+B 굵게"); K(Avalonia.Input.Key.B, C);
+bool i0 = S.Italic; K(Avalonia.Input.Key.I, C); Check(S.Italic != i0, "Ctrl+I 기울임꼴"); K(Avalonia.Input.Key.I, C);
+bool u0 = S.Underline; K(Avalonia.Input.Key.U, C); Check(S.Underline != u0, "Ctrl+U 밑줄"); K(Avalonia.Input.Key.U, C);
+S.TextBg = true; S.TextBgColor = Avalonia.Media.Color.Parse("#00FF00"); surface.SyncPending();
+K(Avalonia.Input.Key.Escape); Check(surface.Pending == null, "Esc로 텍스트 편집 끝내기");
+Check(engine.Pick(new Point(790, 790))?.G == 255, "배경 채우기가 텍스트 상자에 칠해짐");
+S.TextBg = false;
+Console.WriteLine("-- 메뉴");
+Click(Text("메뉴")); Click(Text("인쇄")); Check(w.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == "2D 인쇄" && t.IsEffectivelyVisible), "메뉴에 인쇄 페이지");
+var pdf = Path.Combine(outDir, "print.pdf"); Export.SavePdf(engine, pdf, true); Check(new FileInfo(pdf).Length > 1000 && File.ReadAllText(pdf).StartsWith("%PDF"), "PDF 저장");
+K(Avalonia.Input.Key.Escape);
+var proj = Path.Combine(outDir, "groups.op3d");
+Click(Text("3D 셰이프")); Click(Tip("구")); Drag(Canvas(800, 500), Canvas(1000, 700)); K(Avalonia.Input.Key.D, C); K(Avalonia.Input.Key.A, C); K(Avalonia.Input.Key.G, C);
+Export.SaveProject(engine, proj); using (var e2 = new Engine(10, 10)) { Check(Export.LoadProject(e2, proj) && e2.ObjectIds().All(i => e2.Group(i) != 0), "그룹이 프로젝트 파일에 저장됨"); }
+}
 
 Console.WriteLine(failures.Count == 0 ? "ALL PASSED" : $"{failures.Count} FAILED");
 return failures.Count == 0 ? 0 : 1;

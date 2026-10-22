@@ -50,6 +50,8 @@ internal static unsafe class Native
     [DllImport(Lib)] public static extern int op3d_undo(IntPtr c);
     [DllImport(Lib)] public static extern int op3d_redo(IntPtr c);
     [DllImport(Lib)] public static extern int op3d_undo_count(IntPtr c);
+    [DllImport(Lib)] public static extern int op3d_undo_discard(IntPtr c);
+    [DllImport(Lib)] public static extern ulong op3d_history_serial(IntPtr c);
     [DllImport(Lib)] public static extern int op3d_redo_count(IntPtr c);
     [DllImport(Lib)] public static extern uint op3d_history_label(IntPtr c, int redo, int i);
     [DllImport(Lib)] public static extern void op3d_obj_begin(IntPtr c);
@@ -64,6 +66,18 @@ internal static unsafe class Native
     [DllImport(Lib)] public static extern int op3d_obj_info(IntPtr c, uint id, float* out14);
     [DllImport(Lib)] public static extern uint op3d_obj_pick(IntPtr c, int x, int y);
     [DllImport(Lib)] public static extern int op3d_obj_count(IntPtr c);
+    [DllImport(Lib)] public static extern void op3d_obj_rotate_about(IntPtr c, uint id, uint axis, float deg, float cx, float cy, float cz);
+    [DllImport(Lib)] public static extern uint op3d_obj_clone(IntPtr c, uint id, float dx, float dy, uint group);
+    [DllImport(Lib)] public static extern int op3d_obj_remove(IntPtr c, uint id);
+    [DllImport(Lib)] public static extern void op3d_obj_set_group(IntPtr c, uint id, uint group);
+    [DllImport(Lib)] public static extern uint op3d_obj_group(IntPtr c, uint id);
+    [DllImport(Lib)] public static extern int op3d_obj_ids(IntPtr c, uint* out_, int max);
+    [DllImport(Lib)] public static extern void op3d_clear_rect(IntPtr c, int x, int y, int w, int h, uint label);
+    [DllImport(Lib)] public static extern void op3d_clip_clear(IntPtr c);
+    [DllImport(Lib)] public static extern void op3d_clip_add(IntPtr c, uint id);
+    [DllImport(Lib)] public static extern int op3d_clip_count(IntPtr c);
+    [DllImport(Lib)] public static extern int op3d_clip_paste(IntPtr c, float dx, float dy);
+    [DllImport(Lib)] public static extern void op3d_set_perspective(IntPtr c, int on);
     [DllImport(Lib)] public static extern void op3d_render_3d(IntPtr c, byte* out_, int ow, int oh, float yaw, float pitch, float zoom, int ss);
     [DllImport(Lib)] public static extern float* op3d_export_tris(IntPtr c, out int count);
     [DllImport(Lib)] public static extern byte* op3d_save(IntPtr c, out int len);
@@ -128,6 +142,9 @@ public sealed unsafe class Engine : IDisposable
     public void Flip(bool horizontal) => Native.op3d_flip(_h, horizontal ? 1 : 0);
     public bool Undo() => Native.op3d_undo(_h) != 0;
     public bool Redo() => Native.op3d_redo(_h) != 0;
+    /// <summary>Identity of the newest undo step (changes with every new step, even when history is full).</summary>
+    public ulong HistorySerial => Native.op3d_history_serial(_h);
+    public bool UndoDiscard() => Native.op3d_undo_discard(_h) != 0;
     public Label HistoryLabel(bool redo, int i) => (Label)Native.op3d_history_label(_h, redo ? 1 : 0, i);
 
     /// <summary>Composite a premultiplied BGRA bitmap rendered by Avalonia.</summary>
@@ -185,6 +202,55 @@ public sealed unsafe class Engine : IDisposable
     public bool DeleteObject(uint id) => Native.op3d_obj_delete(_h, id) != 0;
     public uint DuplicateObject(uint id) => Native.op3d_obj_duplicate(_h, id);
     public uint PickObject(Point p) => Native.op3d_obj_pick(_h, (int)Math.Floor(p.X), (int)Math.Floor(p.Y));
+    public void RotateObjectAbout(uint id, int axis, double deg, Vector3D c) =>
+        Native.op3d_obj_rotate_about(_h, id, (uint)axis, (float)deg, (float)c.X, (float)c.Y, (float)c.Z);
+    public uint CloneObject(uint id, double dx, double dy, uint group) => Native.op3d_obj_clone(_h, id, (float)dx, (float)dy, group);
+    public bool RemoveObject(uint id) => Native.op3d_obj_remove(_h, id) != 0;
+    public uint Group(uint id) => Native.op3d_obj_group(_h, id);
+    public void SetGroup(uint id, uint group) => Native.op3d_obj_set_group(_h, id, group);
+
+    /// <summary>All object ids, oldest first.</summary>
+    public uint[] ObjectIds()
+    {
+        var ids = new uint[ObjectCount];
+        fixed (uint* p = ids) Native.op3d_obj_ids(_h, p, ids.Length);
+        return ids;
+    }
+
+    /// <summary>Make a canvas rectangle transparent (a lifted 2D selection leaves a hole).</summary>
+    public void ClearRect(PixelRect r, Label label) => Native.op3d_clear_rect(_h, r.X, r.Y, r.Width, r.Height, (uint)label);
+
+    /// <summary>Straight-alpha RGBA copy of a canvas rectangle (clipped to the canvas).</summary>
+    public WriteableBitmap? CopyPixels(PixelRect r)
+    {
+        r = r.Intersect(new PixelRect(0, 0, Width, Height));
+        if (r.Width <= 0 || r.Height <= 0) return null;
+        var src = (byte*)Native.op3d_pixels(_h);
+        var bmp = new WriteableBitmap(new PixelSize(r.Width, r.Height), new Vector(96, 96), PixelFormat.Rgba8888, AlphaFormat.Unpremul);
+        using var fb = bmp.Lock();
+        for (int y = 0; y < r.Height; y++)
+            Buffer.MemoryCopy(src + ((r.Y + y) * Width + r.X) * 4, (byte*)fb.Address + y * fb.RowBytes, fb.RowBytes, r.Width * 4);
+        return bmp;
+    }
+
+    // engine-side 3D clipboard: copies survive deleting the originals ("cut")
+    public void CopyObjects(IEnumerable<uint> ids)
+    {
+        Native.op3d_clip_clear(_h);
+        foreach (var id in ids) Native.op3d_clip_add(_h, id);
+    }
+
+    public int ClipboardObjects => Native.op3d_clip_count(_h);
+
+    /// <summary>Paste the copied objects (no history step of its own); returns the new ids.</summary>
+    public uint[] PasteObjects(double dx, double dy)
+    {
+        int n = Native.op3d_clip_paste(_h, (float)dx, (float)dy);
+        var all = ObjectIds();
+        return all[^Math.Min(n, all.Length)..];
+    }
+
+    public bool Perspective { set => Native.op3d_set_perspective(_h, value ? 1 : 0); }
 
     public ObjInfo? Info(uint id)
     {
@@ -287,6 +353,7 @@ public enum Label : uint
 {
     None = 0, Brush = 1, Eraser = 2, Fill = 3, Shape2D = 4, Sticker = 5, Text = 6, AddObject = 7, EditObject = 8,
     DeleteObject = 9, CanvasSize = 10, Crop = 11, Rotate = 12, Flip = 13, Paste = 14, Material = 15, Effect = 16, CanvasView = 17,
+    Selection = 18, Group = 19, Ungroup = 20, Cut = 21,
 }
 
 public static class Labels
@@ -310,6 +377,10 @@ public static class Labels
         Label.Material => "색 및 재질",
         Label.Effect => "효과",
         Label.CanvasView => "캔버스 설정",
+        Label.Selection => "선택 영역",
+        Label.Group => "그룹",
+        Label.Ungroup => "그룹 해제",
+        Label.Cut => "잘라내기",
         _ => "편집",
     };
 }

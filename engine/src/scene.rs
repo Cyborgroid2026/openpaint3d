@@ -28,6 +28,8 @@ pub struct Obj {
     pub scale: V3,
     pub color: [f32; 3],
     pub finish: u32,
+    /// objects sharing a non-zero group id are selected and moved together
+    pub group: u32,
 }
 
 impl Obj {
@@ -102,14 +104,18 @@ impl Camera {
     }
 
     /// Orbit camera around the canvas centre for the 3D view.
-    pub fn orbit(w: f32, h: f32, yaw: f32, pitch: f32, zoom: f32, out_w: f32, out_h: f32) -> Camera {
+    /// Without `perspective` the camera backs far away with a matching long lens, which is
+    /// visually orthographic.
+    #[allow(clippy::too_many_arguments)]
+    pub fn orbit(w: f32, h: f32, yaw: f32, pitch: f32, zoom: f32, out_w: f32, out_h: f32, perspective: bool) -> Camera {
         let target = v3(w / 2.0, h / 2.0, 0.0);
-        let dist = 1.6 * w.max(h) / zoom.max(0.05);
+        let lens = if perspective { 1.0 } else { 40.0 };
+        let dist = 1.6 * w.max(h) / zoom.max(0.05) * lens;
         let (sy, cy) = yaw.to_radians().sin_cos();
         let (sp, cp) = pitch.to_radians().sin_cos();
         let dir = v3(sy * cp, sp, -cy * cp);
         let fov = 40f32.to_radians();
-        let focal = (out_h / 2.0) / (fov / 2.0).tan();
+        let focal = (out_h / 2.0) / (fov / 2.0).tan() * lens;
         Camera::look_at(target + dir * dist, target, v3(0.0, -1.0, 0.0), focal, out_w / 2.0, out_h / 2.0)
     }
 
@@ -349,6 +355,7 @@ mod tests {
             scale: v3(120.0, 120.0, 120.0),
             color: [0.8, 0.2, 0.2],
             finish: FINISH_GLOSS,
+            group: 0,
         };
         let mut color = vec![[0.0f32; 4]; w * h];
         let mut depth = vec![0.0f32; w * h];

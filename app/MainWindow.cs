@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -84,7 +85,12 @@ public sealed class MainWindow : Window
     private string? _libraryCategory;
     private string _libraryQuery = "";
     private Tool _beforeLibrary = Tool.Shape3D;
-    private uint _clipObject;
+    private enum CopyKind { None, Image, Objects }
+    private CopyKind _lastCopy;
+    private byte[]? _clip2D;
+    private int _pasteCount;
+    private FlatButton _collapse = null!;
+    private const string ObjectsMarker = "openpaint3d:3d-objects";
 
     private static List<string>? _fonts;
     private static readonly Dictionary<string, IImage> ThumbCache = new();
@@ -142,7 +148,8 @@ public sealed class MainWindow : Window
         BuildMenu();
         Content = new Grid { Children = { main, _menu, _overlay, BuildResizeGrips() } };
 
-        KeyDown += OnKey;
+        // tunnel: shortcuts are seen before a focused slider / combo box / text box eats the key
+        AddHandler(KeyDownEvent, OnKey, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         Closing += OnClosing;
         PropertyChanged += (_, e) =>
         {
@@ -229,20 +236,22 @@ public sealed class MainWindow : Window
         Grid.SetColumn(tabs, 1);
         bar.Children.Add(tabs);
 
-        var collapse = new FlatButton { Width = 44, Hover = P3.BarHover, Child = Icons.Make(Icons.ChevronUp, 16, Brushes.White) }.Init();
-        ToolTip.SetTip(collapse, "오른쪽 패널 숨기기/표시");
-        collapse.Click += () =>
-        {
-            _panelHidden = !_panelHidden;
-            collapse.Child = Icons.Make(_panelHidden ? "M5,9 L12,16 L19,9" : Icons.ChevronUp, 16, Brushes.White);
-            ShowPanel();
-        };
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 0), Children = { _paste, _undo, _history, _redo, collapse } };
+        _collapse = new FlatButton { Width = 44, Hover = P3.BarHover, Child = Icons.Make(Icons.ChevronUp, 16, Brushes.White) }.Init();
+        ToolTip.SetTip(_collapse, "오른쪽 패널 숨기기/표시 (M)");
+        _collapse.Click += TogglePanel;
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 6, 0), Children = { _paste, _undo, _history, _redo, _collapse } };
         Grid.SetColumn(right, 2);
         bar.Children.Add(right);
 
         var stack = new StackPanel { Children = { caption, bar } };
         return new Border { Background = P3.Bar, Child = stack };
+    }
+
+    private void TogglePanel()
+    {
+        _panelHidden = !_panelHidden;
+        _collapse.Child = Icons.Make(_panelHidden ? "M5,9 L12,16 L19,9" : Icons.ChevronUp, 16, Brushes.White);
+        ShowPanel();
     }
 
     private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
@@ -343,20 +352,12 @@ public sealed class MainWindow : Window
     private Control BuildSubBar()
     {
         _selectBtn = SubButton("선택", Icons.Select, () => SelectTab(Tool.Select), tip: "3D 개체를 선택해 옮기고 회전합니다");
-        _cropBtn = SubButton("자르기", Icons.Crop, () =>
-        {
-            SelectTab(Tool.Canvas);
-            _surface.BeginCrop();
-            ShowPanel();
-        });
+        _cropBtn = SubButton("자르기", Icons.Crop, BeginCrop);
         var magic = SubButton("매직 선택", Icons.MagicSelect, () => { }, false, "OpenPaint 3D에서는 지원하지 않습니다");
         var mixed = SubButton("혼합 현실", Icons.MixedReality, () => { }, false, "OpenPaint 3D에서는 지원하지 않습니다");
-        _view3dBtn = SubButton("3D 보기", Icons.Plane3D, () =>
-        {
-            _surface.SetView3D(!S.View3D);
-            ShowPanel();
-        }, tip: "장면 전체를 입체로 돌려 봅니다. 드래그: 회전, 휠: 확대/축소");
+        _view3dBtn = SubButton("3D 보기", Icons.Plane3D, Toggle3DView, tip: "장면 전체를 입체로 돌려 봅니다. 드래그: 회전, 휠: 확대/축소");
 
+        _zoomSlider.Focusable = false;
         _zoomSlider.PropertyChanged += (_, e) =>
         {
             if (e.Property == RangeBase.ValueProperty && !_syncingZoom) _surface.SetZoom(_zoomSlider.Value / 100);
@@ -402,6 +403,19 @@ public sealed class MainWindow : Window
         return new Border { Background = P3.Pane, Child = bar, ClipToBounds = true };
     }
 
+    private void BeginCrop()
+    {
+        SelectTab(Tool.Canvas);
+        _surface.BeginCrop();
+        ShowPanel();
+    }
+
+    private void Toggle3DView()
+    {
+        _surface.SetView3D(!S.View3D);
+        ShowPanel();
+    }
+
     // ------------------------------------------------------------------- tabs
 
     private void SelectTab(Tool t)
@@ -434,7 +448,12 @@ public sealed class MainWindow : Window
         if (S.View3D)
         {
             p.Children.Add(Header("3D 보기"));
-            p.Children.Add(Hint("캔버스와 3D 개체를 입체로 둘러봅니다.\n\n• 드래그: 장면 회전\n• 마우스 휠: 확대/축소\n• 자세히(…) > 3D 보기 재설정: 처음 각도로\n\n편집하려면 위쪽의 '3D 보기'를 다시 누르세요."));
+            p.Children.Add(Hint("캔버스와 3D 개체를 입체로 둘러봅니다.\n\n• 드래그: 장면 회전\n• 마우스 휠: 확대/축소\n• 자세히(…) > 3D 보기 재설정: 처음 각도로\n\n편집하려면 위쪽의 '3D 보기'를 다시 누르세요 (Ctrl+3)."));
+            p.Children.Add(new TextBlock { Text = "원근감 표시 (Ctrl+Shift+E)", FontSize = 13, Foreground = Dark, Margin = new Thickness(0, 14, 0, 0) });
+            var persp = new ToggleSwitch { IsChecked = S.Perspective, OnContent = "켬", OffContent = "끔" };
+            persp.IsCheckedChanged += (_, _) => _surface.SetPerspective(persp.IsChecked == true);
+            p.Children.Add(persp);
+            NoFocus(p);
             _panel.Content = p;
             return;
         }
@@ -453,8 +472,22 @@ public sealed class MainWindow : Window
                 case Tool.Library: LibraryPanel(p); break;
                 case Tool.Select: SelectPanel(p); break;
             }
+        NoFocus(p);
         _panel.Content = p;
     }
+
+    /// <summary>
+    /// Panel controls other than text boxes never keep the keyboard focus, so arrow keys and
+    /// shortcuts keep working on the canvas after a slider, combo box or switch was used.
+    /// </summary>
+    private static void NoFocus(Control root)
+    {
+        foreach (var c in root.GetLogicalDescendants().OfType<Control>())
+            if (c is Slider or ComboBox or ToggleSwitch or CheckBox or Button) c.Focusable = false;
+    }
+
+    /// <summary>Give the keyboard back to the canvas (after typing a value into a panel box).</summary>
+    private void FocusCanvas() => Dispatcher.UIThread.Post(() => _surface.Focus(), DispatcherPriority.Input);
 
     // ------------------------------------------------------------ panel parts
 
@@ -522,10 +555,10 @@ public sealed class MainWindow : Window
     }
 
     /// <summary>Tall button with an icon above its label (3D selection panel).</summary>
-    private static FlatButton TallButton(string text, string icon, Action click, bool enabled = true)
+    private static FlatButton TallButton(string text, string icon, Action click, bool enabled = true, string? tip = null)
     {
         var col = new StackPanel { Spacing = 4, Children = { Center(Icons.Make(icon, 18, P3.Ink)), new TextBlock { Text = text, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center, Foreground = Dark } } };
-        return BoxButton(col, click, 64, enabled, enabled ? null : "OpenPaint 3D에서는 지원하지 않습니다");
+        return BoxButton(col, click, 64, enabled, tip);
     }
 
     private static FlatButton SquareButton(string icon, string tip, Action click, bool enabled = true)
@@ -591,6 +624,8 @@ public sealed class MainWindow : Window
         }
         box.KeyDown += (_, e) => { if (e.Key == Key.Enter) FromBox(); };
         box.LostFocus += (_, _) => FromBox();
+        // clicking into the box selects the old value, so typing replaces it
+        box.GotFocus += (_, _) => Dispatcher.UIThread.Post(box.SelectAll);
         if (done != null) s.AddHandler(PointerReleasedEvent, (_, _) => done(), Avalonia.Interactivity.RoutingStrategies.Tunnel | Avalonia.Interactivity.RoutingStrategies.Bubble, true);
         return new StackPanel { Children = { head, s } };
     }
@@ -622,7 +657,8 @@ public sealed class MainWindow : Window
         if (_surface.Selected != 0)
         {
             if (final) _engine.Checkpoint(Label.Material);
-            _engine.SetMaterial(_surface.Selected, S.Color, _engine.Info(_surface.Selected)?.Finish ?? S.Finish);
+            foreach (var id in _surface.SelectedIds)
+                _engine.SetMaterial(id, S.Color, _engine.Info(id)?.Finish ?? S.Finish);
             _surface.Refresh(final, !final);
         }
     }
@@ -631,10 +667,11 @@ public sealed class MainWindow : Window
     {
         S.Finish = f;
         _surface.SyncPending();
-        if (_surface.Selected != 0 && _engine.Info(_surface.Selected) is { } info)
+        if (_surface.Selected != 0)
         {
             _engine.Checkpoint(Label.Material);
-            _engine.SetMaterial(_surface.Selected, info.Color, f);
+            foreach (var id in _surface.SelectedIds)
+                if (_engine.Info(id) is { } info) _engine.SetMaterial(id, info.Color, f);
             _surface.Refresh();
         }
     }
@@ -958,14 +995,74 @@ public sealed class MainWindow : Window
 
     private void SelectPanel(StackPanel p)
     {
+        if (_surface.Pending is { } pending and not TextItem)
+        {
+            SelectionEditPanel(p, pending);
+            return;
+        }
         p.Children.Add(Header("선택"));
-        p.Children.Add(Hint("3D 개체를 클릭하면 선택됩니다. 선택한 개체는 끌어서 옮기고, 둘레의 손잡이로 회전·크기·깊이를 조정할 수 있습니다."));
+        p.Children.Add(Hint("캔버스에서 끌어 사각형 영역을 선택하면 옮기거나 복사할 수 있습니다. 3D 개체는 클릭해서 선택하고, Ctrl+클릭으로 여러 개를 고릅니다."));
+        p.Children.Add(Section("선택"));
+        var multi = TallButton("다중 선택", Icons.MultiSelect, () => { S.MultiSelect = !S.MultiSelect; ShowPanel(); });
+        multi.SelectedBrush = P3.SubSelected;
+        multi.IsSelected = S.MultiSelect;
+        p.Children.Add(Row(TallButton("모두 선택", Icons.SelectAll, SelectAll, tip: "모두 선택 (Ctrl+A)"), multi));
+        var canvasAll = WideButton("캔버스 전체 선택", Icons.Canvas, () => _surface.LiftSelection(new Rect(0, 0, _engine.Width, _engine.Height)));
+        canvasAll.Margin = new Thickness(0, 8, 0, 0);
+        p.Children.Add(canvasAll);
+        p.Children.Add(Section("편집"));
+        p.Children.Add(SquareRow(SquareButton(Icons.Paste, "붙여넣기 (Ctrl+V)", () => _ = Paste())));
+    }
+
+    /// <summary>Panel for a picked-up 2D selection (or any editable 2D item in the select tool).</summary>
+    private void SelectionEditPanel(StackPanel p, Pending2D item)
+    {
+        p.Children.Add(Header("2D 선택"));
+        p.Children.Add(Section("편집"));
+        p.Children.Add(SquareRow(
+            SquareButton(Icons.Cut, "잘라내기 (Ctrl+X)", () => _ = Copy(cut: true)),
+            SquareButton(Icons.Copy, "복사 (Ctrl+C)", () => _ = Copy(cut: false)),
+            SquareButton(Icons.Paste, "붙여넣기 (Ctrl+V)", () => _ = Paste()),
+            SquareButton(Icons.Trash, "삭제 (Delete)", () => _surface.DeleteSelection())));
+        var sticker = WideButton("스티커 만들기", Icons.MakeSticker, () => _ = MakeSticker());
+        sticker.Margin = new Thickness(0, 12, 0, 0);
+        ToolTip.SetTip(sticker, "선택 영역을 사용자 지정 스티커로 저장합니다");
+        p.Children.Add(sticker);
+        p.Children.Add(Section("회전 및 대칭"));
+        p.Children.Add(SquareRow(
+            SquareButton(Icons.RotateLeft, "왼쪽으로 회전", () => _surface.RotatePending(-90)),
+            SquareButton(Icons.RotateRight, "오른쪽으로 회전", () => _surface.RotatePending(90)),
+            SquareButton(Icons.FlipH, "좌우 대칭", () => _surface.FlipPending(true)),
+            SquareButton(Icons.FlipV, "상하 대칭", () => _surface.FlipPending(false))));
+        p.Children.Add(Hint("끌어서 옮기고 손잡이로 크기와 각도를 바꿉니다. 방향키로 1픽셀(Shift: 10픽셀)씩 움직입니다. 다른 곳을 누르거나 Enter/Esc로 내려놓습니다."));
+    }
+
+    /// <summary>Save the current 2D selection as a custom sticker.</summary>
+    private async Task MakeSticker()
+    {
+        if (_surface.RenderPending() is not { } rtb) return;
+        try
+        {
+            Directory.CreateDirectory(StickerDir);
+            var dst = Path.Combine(StickerDir, $"{DateTime.Now:yyyyMMddHHmmss}_선택.png");
+            using (rtb) rtb.Save(dst);
+            S.Custom = new Bitmap(dst);
+            S.Texture = -1;
+            _stickerTab = 2;
+            _surface.CommitPending();
+            SelectTab(Tool.Sticker);
+        }
+        catch (Exception ex)
+        {
+            await Ask("스티커를 만들 수 없음", ex.Message, "확인");
+        }
     }
 
     private void SelectionPanel(StackPanel p)
     {
         uint id = _surface.Selected;
-        p.Children.Add(Header("3D 선택"));
+        int count = _surface.SelectedIds.Count;
+        p.Children.Add(Header(count > 1 ? $"3D 선택 ({count}개)" : "3D 선택"));
         var edit = WideButton("색 편집", Icons.Palette, () => { _editColor = !_editColor; ShowPanel(); });
         edit.IsSelected = _editColor;
         edit.SelectedBrush = P3.SubSelected;
@@ -977,20 +1074,30 @@ public sealed class MainWindow : Window
             p.Children.Add(ColorBlock());
         }
         p.Children.Add(Section("선택"));
-        p.Children.Add(Row(TallButton("모두 선택", Icons.SelectAll, () => { }, false), TallButton("다중 선택", Icons.MultiSelect, () => { }, false)));
+        var multi = TallButton("다중 선택", Icons.MultiSelect, () => { S.MultiSelect = !S.MultiSelect; ShowPanel(); });
+        multi.SelectedBrush = P3.SubSelected;
+        multi.IsSelected = S.MultiSelect;
+        ToolTip.SetTip(multi, "켜면 클릭할 때마다 개체를 선택에 더하거나 뺍니다 (Ctrl+클릭과 같음)");
+        p.Children.Add(Row(TallButton("모두 선택", Icons.SelectAll, SelectAll, tip: "모두 선택 (Ctrl+A)"), multi));
         p.Children.Add(Section("그룹화"));
-        p.Children.Add(Row(TallButton("그룹", Icons.Group, () => { }, false), TallButton("그룹 해제", Icons.Ungroup, () => { }, false)));
+        bool grouped = _surface.SelectedIds.Any(o => _engine.Group(o) != 0);
+        p.Children.Add(Row(
+            TallButton("그룹", Icons.Group, () => GroupSelection(true), count > 1 && !AllOneGroup(), count > 1 ? "그룹 (Ctrl+G)" : "Ctrl+클릭이나 다중 선택으로 개체를 두 개 이상 고르세요"),
+            TallButton("그룹 해제", Icons.Ungroup, () => GroupSelection(false), grouped, grouped ? "그룹 해제 (Ctrl+Shift+G)" : "그룹으로 묶인 개체가 없습니다")));
         p.Children.Add(Section("편집"));
         p.Children.Add(SquareRow(
-            SquareButton(Icons.Cut, "잘라내기(지원하지 않음)", () => { }, false),
-            SquareButton(Icons.Copy, "복사", () => { _clipObject = id; ShowPanel(); }),
-            SquareButton(Icons.Paste, "붙여넣기", PasteObject, _clipObject != 0 && _engine.Info(_clipObject) != null),
-            SquareButton(Icons.Trash, "삭제", () => _surface.DeleteSelection())));
+            SquareButton(Icons.Cut, "잘라내기 (Ctrl+X)", () => _ = Copy(cut: true)),
+            SquareButton(Icons.Copy, "복사 (Ctrl+C)", () => _ = Copy(cut: false)),
+            SquareButton(Icons.Paste, "붙여넣기 (Ctrl+V)", () => _ = Paste()),
+            SquareButton(Icons.Trash, "삭제 (Delete)", () => _surface.DeleteSelection())));
         p.Children.Add(Section("회전 및 대칭"));
         void Turn(int axis, double deg, Label label)
         {
             _engine.Checkpoint(label);
-            _engine.RotateObject(id, axis, deg);
+            var centre = _surface.SelectionInfo()?.Pos ?? default;
+            foreach (var o in _surface.SelectedIds)
+                if (_surface.SelectedIds.Count == 1) _engine.RotateObject(o, axis, deg);
+                else _engine.RotateObjectAbout(o, axis, deg, centre);
             _surface.Refresh();
         }
         p.Children.Add(SquareRow(
@@ -1000,12 +1107,49 @@ public sealed class MainWindow : Window
             SquareButton(Icons.FlipV, "상하 대칭", () => Turn(0, 180, Label.Flip))));
     }
 
-    private void PasteObject()
+    private bool AllOneGroup()
     {
-        if (_clipObject == 0 || _engine.Info(_clipObject) == null) return;
-        var id = _engine.DuplicateObject(_clipObject);
+        var groups = _surface.SelectedIds.Select(_engine.Group).Distinct().ToList();
+        return groups.Count == 1 && groups[0] != 0;
+    }
+
+    private void GroupSelection(bool group)
+    {
+        var ids = _surface.SelectedIds.ToList();
+        if (ids.Count < (group ? 2 : 1)) return;
+        _engine.Checkpoint(group ? Label.Group : Label.Ungroup);
+        uint g = group ? _engine.ObjectIds().Select(_engine.Group).DefaultIfEmpty(0u).Max() + 1 : 0;
+        foreach (var id in ids) _engine.SetGroup(id, g);
         _surface.Refresh();
-        _surface.Select(id);
+        ShowPanel();
+    }
+
+    /// <summary>Ctrl+A / '모두 선택': every 3D object, or the whole canvas when there are none.</summary>
+    private void SelectAll()
+    {
+        _surface.CommitPending();
+        if (S.Tool is not (Tool.Select or Tool.Shape3D or Tool.Library)) SelectTab(Tool.Select);
+        if (_engine.ObjectCount > 0) _surface.SelectAllObjects();
+        else _surface.LiftSelection(new Rect(0, 0, _engine.Width, _engine.Height));
+        ShowPanel();
+    }
+
+    private void DuplicateSelection()
+    {
+        var ids = _surface.SelectedIds.ToList();
+        if (ids.Count == 0) return;
+        _engine.Checkpoint(Label.AddObject);
+        var groups = new Dictionary<uint, uint>();
+        uint next = _engine.ObjectIds().Select(_engine.Group).DefaultIfEmpty(0u).Max() + 1;
+        var copies = new List<uint>();
+        foreach (var id in ids)
+        {
+            uint g = _engine.Group(id);
+            if (g != 0 && !groups.ContainsKey(g)) groups[g] = next++;
+            copies.Add(_engine.CloneObject(id, 30, 30, g == 0 ? 0 : groups[g]));
+        }
+        _surface.Refresh();
+        _surface.SelectMany(copies);
     }
 
     private void StickerPanel(StackPanel p)
@@ -1149,9 +1293,9 @@ public sealed class MainWindow : Window
             return b;
         }
         var style = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
-        style.Children.Add(Toggle(new TextBlock { Text = "B", FontWeight = FontWeight.Bold, FontSize = 15 }, S.Bold, "굵게", v => S.Bold = v));
-        style.Children.Add(Toggle(new TextBlock { Text = "I", FontStyle = FontStyle.Italic, FontSize = 15 }, S.Italic, "기울임꼴", v => S.Italic = v));
-        style.Children.Add(Toggle(new TextBlock { Text = "U", TextDecorations = TextDecorations.Underline, FontSize = 15 }, S.Underline, "밑줄", v => S.Underline = v));
+        style.Children.Add(Toggle(new TextBlock { Text = "B", FontWeight = FontWeight.Bold, FontSize = 15 }, S.Bold, "굵게 (Ctrl+B)", v => S.Bold = v));
+        style.Children.Add(Toggle(new TextBlock { Text = "I", FontStyle = FontStyle.Italic, FontSize = 15 }, S.Italic, "기울임꼴 (Ctrl+I)", v => S.Italic = v));
+        style.Children.Add(Toggle(new TextBlock { Text = "U", TextDecorations = TextDecorations.Underline, FontSize = 15 }, S.Underline, "밑줄 (Ctrl+U)", v => S.Underline = v));
         style.Children.Add(new Border { Width = 8 });
         var aligns = new[] { (TextAlignment.Left, "M4,6 H20 M4,10 H14 M4,14 H20 M4,18 H14", "왼쪽 맞춤"), (TextAlignment.Center, "M4,6 H20 M7,10 H17 M4,14 H20 M7,18 H17", "가운데 맞춤"), (TextAlignment.Right, "M4,6 H20 M10,10 H20 M4,14 H20 M10,18 H20", "오른쪽 맞춤") };
         foreach (var (al, icon, tip) in aligns)
@@ -1160,6 +1304,19 @@ public sealed class MainWindow : Window
             style.Children.Add(Toggle(Icons.Make(icon, 16, P3.Ink), S.Align == a, tip, _ => { S.Align = a; ShowPanel(); }));
         }
         p.Children.Add(style);
+        if (!S.Text3D)
+        {
+            // 2D text can sit on a filled box (Paint 3D's "배경 채우기")
+            var bg = new Grid { ColumnDefinitions = new ColumnDefinitions("*,8,Auto"), Margin = new Thickness(0, 10, 0, 0) };
+            var fill = new CheckBox { Content = "배경 채우기", IsChecked = S.TextBg, VerticalAlignment = VerticalAlignment.Center };
+            fill.IsCheckedChanged += (_, _) => { S.TextBg = fill.IsChecked == true; _surface.SyncPending(); };
+            bg.Children.Add(fill);
+            var bgColor = SwatchButton(() => S.TextBgColor, c => { S.TextBgColor = c; S.TextBg = true; fill.IsChecked = true; _surface.SyncPending(); });
+            ToolTip.SetTip(bgColor, "배경 색");
+            Grid.SetColumn(bgColor, 2);
+            bg.Children.Add(bgColor);
+            p.Children.Add(bg);
+        }
         if (S.Text3D) p.Children.Add(FinishCombo());
         p.Children.Add(ColorBlock());
     }
@@ -1569,6 +1726,9 @@ public sealed class MainWindow : Window
 
     private void ShowHistory()
     {
+        // jumping through history under a floating item would drop it onto the wrong state
+        _surface.CommitPending();
+        UpdateState();
         var flyout = new Flyout { Placement = PlacementMode.BottomEdgeAlignedRight };
         flyout.Content = BuildHistory(flyout);
         FlyoutBase.SetAttachedFlyout(_history, flyout);
@@ -1651,52 +1811,140 @@ public sealed class MainWindow : Window
         if (S.Tool is Tool.Canvas or Tool.Effects) ShowPanel();
     }
 
+    /// <summary>
+    /// Key of a shortcut. Letters and digits fall back to the physical key, so shortcuts still
+    /// work when an input method (e.g. Korean Hangul mode) reports the key as something else.
+    /// </summary>
+    private static Key ShortcutKey(KeyEventArgs e)
+    {
+        if (e.Key is >= Key.A and <= Key.Z or >= Key.D0 and <= Key.D9) return e.Key;
+        var q = e.PhysicalKey.ToQwertyKey();
+        return q is >= Key.A and <= Key.Z or >= Key.D0 and <= Key.D9 ? q : e.Key;
+    }
+
     private void OnKey(object? sender, KeyEventArgs e)
     {
         bool ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control), shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-        bool inText = e.Source is TextBox;
+        bool alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+        var key = ShortcutKey(e);
         if (_overlay.IsVisible)
         {
-            if (e.Key == Key.Escape) { HideOverlay(); e.Handled = true; }
+            if (key == Key.Escape) { HideOverlay(); e.Handled = true; }
             return;
         }
         if (_menu.IsVisible)
         {
-            if (e.Key == Key.Escape) { HideMenu(); e.Handled = true; }
+            if (key == Key.Escape) { HideMenu(); e.Handled = true; }
             return;
         }
-        if (inText && !(ctrl && e.Key is Key.S or Key.O or Key.N)) return;
-        switch (e.Key)
+        if (alt) return;
+        bool done = true;
+        if (e.Source is TextBox box)
         {
+            // text boxes keep their editing keys; only file commands and a few text keys pass
+            bool onCanvas = box.Parent == _surface;
+            switch (key)
+            {
+                case Key.S or Key.O or Key.N or Key.P when ctrl: done = Shortcut(key, ctrl, shift); break;
+                case Key.B or Key.I or Key.U when ctrl && onCanvas: ToggleTextStyle(key); break;
+                case Key.Escape when onCanvas: _surface.CommitPending(); FocusCanvas(); break;
+                case Key.Enter or Key.Escape when !onCanvas && box.AcceptsReturn == false: FocusCanvas(); done = false; break;
+                default: done = false; break;
+            }
+        }
+        else done = Shortcut(key, ctrl, shift);
+        if (done) e.Handled = true;
+    }
+
+    private void ToggleTextStyle(Key key)
+    {
+        if (key == Key.B) S.Bold = !S.Bold;
+        else if (key == Key.I) S.Italic = !S.Italic;
+        else S.Underline = !S.Underline;
+        _surface.SyncPending();
+        ShowPanel();
+    }
+
+    /// <summary>Paint 3D keyboard shortcuts; returns false for keys it does not use.</summary>
+    private bool Shortcut(Key key, bool ctrl, bool shift)
+    {
+        double step = shift ? 10 : 1;
+        switch (key)
+        {
+            // file
+            case Key.N when ctrl: _ = NewCanvas(); break;
+            case Key.O when ctrl: _ = OpenFile(); break;
+            case Key.S when ctrl && shift: _surface.CommitPending(); ShowMenu("다른 이름으로 저장"); break;
+            case Key.S when ctrl: _ = Save(); break;
+            case Key.P when ctrl: _surface.CommitPending(); ShowMenu("인쇄"); break;
+            // edit
             case Key.Z when ctrl && shift: Redo(); break;
             case Key.Z when ctrl: Undo(); break;
             case Key.Y when ctrl: Redo(); break;
-            case Key.S when ctrl && shift: _surface.CommitPending(); ShowMenu("다른 이름으로 저장"); break;
-            case Key.S when ctrl: _ = Save(); break;
-            case Key.O when ctrl: _ = OpenFile(); break;
-            case Key.N when ctrl: _ = NewCanvas(); break;
+            case Key.C when ctrl && shift: _ = CopyScreenshot(); break;
+            case Key.C when ctrl: _ = Copy(cut: false); break;
+            case Key.X when ctrl && shift: BeginCrop(); break;
+            case Key.X when ctrl: _ = Copy(cut: true); break;
             case Key.V when ctrl: _ = Paste(); break;
-            case Key.D when ctrl && _surface.Selected != 0:
-                var id = _engine.DuplicateObject(_surface.Selected);
-                _surface.Refresh();
-                _surface.Select(id);
+            case Key.A when ctrl: SelectAll(); break;
+            case Key.D when ctrl: DuplicateSelection(); break;
+            case Key.G when ctrl && shift: GroupSelection(false); break;
+            case Key.G when ctrl: GroupSelection(true); break;
+            case Key.B or Key.I or Key.U when ctrl && S.Tool == Tool.Text: ToggleTextStyle(key); break;
+            // view
+            case Key.PageUp when ctrl: _surface.SetZoom(_surface.Zoom * 1.25); break;
+            case Key.PageDown when ctrl: _surface.SetZoom(_surface.Zoom / 1.25); break;
+            case Key.D0 or Key.NumPad0 when ctrl: _surface.FitToView(); break;
+            case Key.D3 or Key.NumPad3 when ctrl: Toggle3DView(); break;
+            case Key.E when ctrl && shift: _surface.SetPerspective(!S.Perspective); ShowPanel(); break;
+            case Key.E when ctrl: SelectTab(Tool.Canvas); break;
+            case Key.OemPlus or Key.Add when ctrl: ChangeSize(+1); break;
+            case Key.OemMinus or Key.Subtract when ctrl: ChangeSize(-1); break;
+            // single keys
+            case Key.I when !ctrl:
+                S.Picking = !S.Picking;
+                ShowPanel();
                 break;
-            case Key.D0 when ctrl: _surface.FitToView(); break;
-            case Key.OemPlus when ctrl: _surface.SetZoom(_surface.Zoom * 1.25); break;
-            case Key.OemMinus when ctrl: _surface.SetZoom(_surface.Zoom / 1.25); break;
-            case Key.C when ctrl && _surface.Selected != 0: _clipObject = _surface.Selected; ShowPanel(); break;
+            case Key.M when !ctrl: TogglePanel(); break;
+            case Key.Left: if (!_surface.Nudge(new Vector(-step, 0))) return false; break;
+            case Key.Right: if (!_surface.Nudge(new Vector(step, 0))) return false; break;
+            case Key.Up: if (!_surface.Nudge(new Vector(0, -step))) return false; break;
+            case Key.Down: if (!_surface.Nudge(new Vector(0, step))) return false; break;
             case Key.Delete or Key.Back: _surface.DeleteSelection(); break;
             case Key.Enter: _surface.CommitPending(); break;
             case Key.Escape:
                 S.Picking = false;
                 if (S.CropMode) _surface.EndCrop(false);
+                else if (_surface.Pending is SelectionItem) _surface.CommitPending();
                 else if (_surface.Pending != null) _surface.CancelPending();
+                else if (S.View3D) _surface.SetView3D(false);
                 else _surface.Select(0);
                 ShowPanel();
                 break;
+            default: return false;
+        }
+        return true;
+    }
+
+    /// <summary>Ctrl + plus / minus: thickness of the current brush, line or text size (as in Paint 3D).</summary>
+    private void ChangeSize(int dir)
+    {
+        static double Step(double v, int dir, double min, double max) =>
+            Math.Clamp(Math.Round(dir > 0 ? Math.Max(v + 1, v * 1.2) : Math.Min(v - 1, v / 1.2)), min, max);
+        switch (S.Tool)
+        {
+            case Tool.Brush: S.BrushSize = Step(S.BrushSize, dir, 1, 200); break;
+            case Tool.Shape2D: S.ShapeThickness = Step(S.ShapeThickness, dir, 0, 60); break;
+            case Tool.Text:
+                int i = Array.FindIndex(FontSizes, f => f >= S.FontSize);
+                i = Math.Clamp((i < 0 ? FontSizes.Length - 1 : i) + dir, 0, FontSizes.Length - 1);
+                S.FontSize = FontSizes[i];
+                break;
             default: return;
         }
-        e.Handled = true;
+        _surface.SyncPending();
+        _surface.Redraw();
+        ShowPanel();
     }
 
     // ------------------------------------------------------------------- menu
@@ -1730,6 +1978,7 @@ public sealed class MainWindow : Window
         Item("삽입", Icons.Insert);
         Item("저장", Icons.Save);
         Item("다른 이름으로 저장", Icons.SaveAs);
+        Item("인쇄", Icons.Print);
         Item("설정", Icons.Settings);
         Item("정보", Icons.Info);
         Item("끝내기", Icons.Exit);
@@ -1826,7 +2075,18 @@ public sealed class MainWindow : Window
                         BigTile("3D 모델", "3D 개체를 GLB 또는 3MF로 내보냅니다.", Icons.Shapes3D, () => { HideMenu(); _ = SaveAs(SaveKind.Model); }),
                     },
                 });
-                p.Children.Add(Hint("FBX 내보내기와 비디오 내보내기는 지원하지 않습니다."));
+                p.Children.Add(Hint("FBX 내보내기와 비디오 내보내기는 지원하지 않습니다. 인쇄용 PDF는 메뉴 > 인쇄 > 2D 인쇄에서 저장합니다."));
+                break;
+            case "인쇄":
+                p.Children.Add(Title("인쇄"));
+                p.Children.Add(new WrapPanel
+                {
+                    Children =
+                    {
+                        BigTile("2D 인쇄", "완성된 그림을 프린터로 보냅니다. 프린터가 없으면 PDF로 저장할 수 있습니다.", Icons.Print, () => ShowPrint2D(p)),
+                        BigTile("3D 인쇄", "3D 개체를 3MF로 내보내 기본 3D 프린팅(슬라이서) 앱에서 엽니다.", Icons.Print3D, () => { HideMenu(); _ = Print3D(); }),
+                    },
+                });
                 break;
             case "설정":
                 p.Children.Add(Title("설정"));
@@ -1839,7 +2099,7 @@ public sealed class MainWindow : Window
                 p.Children.Add(Title("정보"));
                 p.Children.Add(new TextBlock
                 {
-                    Text = "OpenPaint 3D 0.3.0\n\nPaint 3D의 화면 구성과 기능 설명을 참고해 C#(Avalonia)과 Rust로 새로 만든 오픈소스 그림판입니다.\n" +
+                    Text = "OpenPaint 3D 0.4.0\n\nPaint 3D의 화면 구성과 기능 설명을 참고해 C#(Avalonia)과 Rust로 새로 만든 오픈소스 그림판입니다.\n" +
                            "Microsoft의 코드나 리소스는 포함되어 있지 않으며 Microsoft와 관련이 없습니다.",
                     TextWrapping = TextWrapping.Wrap,
                     FontSize = 14,
@@ -1957,27 +2217,241 @@ public sealed class MainWindow : Window
         }
     }
 
-    private async Task Paste()
+    /// <summary>
+    /// Ctrl+C / Ctrl+X: the 2D item being edited goes to the clipboard as a picture, selected
+    /// 3D objects into the engine's object clipboard (marked on the system clipboard).
+    /// </summary>
+    private async Task Copy(bool cut)
     {
-        var cb = Clipboard;
-        if (cb == null) return;
+        if (_surface.Pending is { } item && item is not TextItem)
+        {
+            using var rtb = _surface.RenderPending();
+            if (rtb == null) return;
+            using var ms = new MemoryStream();
+            rtb.Save(ms);
+            _clip2D = ms.ToArray();
+            _lastCopy = CopyKind.Image;
+            _pasteCount = 0;
+            if (cut) _surface.DeleteSelection();
+            ShowPanel();
+            await SetClipboard(_clip2D, null);
+        }
+        else if (_surface.Selected != 0)
+        {
+            var ids = _surface.SelectedIds.ToList();
+            _engine.CopyObjects(ids);
+            _lastCopy = CopyKind.Objects;
+            _pasteCount = 0;
+            if (cut)
+            {
+                _engine.Checkpoint(Label.Cut);
+                foreach (var id in ids) _engine.RemoveObject(id);
+                _surface.Refresh();
+                _surface.Select(0);
+            }
+            ShowPanel();
+            await SetClipboard(null, ObjectsMarker);
+        }
+    }
+
+    private async Task SetClipboard(byte[]? png, string? text)
+    {
+        if (Clipboard is not { } cb) return;
         try
         {
-            var formats = await cb.GetFormatsAsync();
-            var fmt = formats.FirstOrDefault(f => f is "image/png" or "PNG" or "image/bmp" or "image/jpeg");
-            if (fmt != null && await cb.GetDataAsync(fmt) is byte[] bytes)
+            if (text != null) await cb.SetTextAsync(text);
+            else if (png != null)
             {
-                SelectTab(Tool.Sticker);
-                _surface.BeginImage(new Bitmap(new MemoryStream(bytes)));
-                ShowPanel();
-                return;
+                var data = new DataObject();
+                data.Set("image/png", png);
+                await cb.SetDataObjectAsync(data);
             }
         }
         catch (Exception)
         {
-            // fall through to the message below
+            // the in-app copy above still works without a system clipboard
         }
-        await Ask("붙여넣기", "클립보드에 붙여넣을 이미지가 없습니다.", "확인");
+    }
+
+    /// <summary>Ctrl+Shift+C: copy the finished picture (or the 3D view) to the clipboard.</summary>
+    private async Task CopyScreenshot()
+    {
+        _surface.CommitPending();
+        using var img = _engine.Snapshot();
+        using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        _clip2D = data.ToArray();
+        _lastCopy = CopyKind.Image;
+        await SetClipboard(_clip2D, null);
+    }
+
+    private async Task Paste()
+    {
+        // which copy is newest: our 3D objects (marker text) or a picture from anywhere
+        string? text = null;
+        byte[]? picture = null;
+        if (Clipboard is { } cb)
+        {
+            try
+            {
+                text = await cb.GetTextAsync();
+                var formats = await cb.GetFormatsAsync();
+                var fmt = formats.FirstOrDefault(f => f is "image/png" or "PNG" or "image/bmp" or "image/jpeg");
+                if (fmt != null && await cb.GetDataAsync(fmt) is byte[] bytes) picture = bytes;
+            }
+            catch (Exception)
+            {
+                // fall back to the in-app copy
+            }
+        }
+        // the marker only counts when this window's last copy was objects (an image copy may
+        // have failed to reach the system clipboard and left an old marker behind)
+        bool objects = _engine.ClipboardObjects > 0 && _lastCopy == CopyKind.Objects && (text == ObjectsMarker || picture == null);
+        picture ??= _lastCopy == CopyKind.Image ? _clip2D : null;
+        if (objects)
+        {
+            _surface.CommitPending();
+            if (S.Tool is not (Tool.Select or Tool.Shape3D or Tool.Library)) SelectTab(Tool.Select);
+            _engine.Checkpoint(Label.Paste);
+            double off = 30 * ++_pasteCount;
+            var ids = _engine.PasteObjects(off, off);
+            _surface.Refresh();
+            _surface.SelectMany(ids);
+            ShowPanel();
+            return;
+        }
+        if (picture != null)
+        {
+            try
+            {
+                var bmp = new Bitmap(new MemoryStream(picture));
+                // in the select tool a picture becomes a 2D selection, elsewhere an editable picture
+                if (S.Tool == Tool.Select) _surface.BeginSelection(bmp);
+                else
+                {
+                    SelectTab(Tool.Sticker);
+                    _surface.BeginImage(bmp);
+                }
+                ShowPanel();
+                return;
+            }
+            catch (Exception)
+            {
+                // fall through to the message below
+            }
+        }
+        await Ask("붙여넣기", "클립보드에 붙여넣을 이미지나 3D 개체가 없습니다.", "확인");
+    }
+
+    // ----------------------------------------------------------------- print
+
+    private static string[] Printers()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("lpstat", "-e") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return Array.Empty<string>();
+            // an unreachable CUPS server must not freeze the window
+            var read = proc.StandardOutput.ReadToEndAsync();
+            if (!read.Wait(3000))
+            {
+                proc.Kill();
+                return Array.Empty<string>();
+            }
+            return read.Result.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        catch (Exception)
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>2D print page: printer, copies and orientation, or save as PDF.</summary>
+    private void ShowPrint2D(StackPanel p)
+    {
+        p.Children.Clear();
+        p.Children.Add(new TextBlock { Text = "2D 인쇄", FontSize = 30, FontWeight = FontWeight.Light, Margin = new Thickness(0, 0, 0, 10) });
+        var printers = Printers();
+        var printer = new ComboBox { ItemsSource = printers.Length > 0 ? printers : new[] { "(설치된 프린터 없음)" }, SelectedIndex = 0, Width = 320, IsEnabled = printers.Length > 0 };
+        var copies = new NumericUpDown { Minimum = 1, Maximum = 99, Value = 1, Width = 140, FormatString = "0" };
+        var landscape = new ComboBox { ItemsSource = new[] { "자동", "세로", "가로" }, SelectedIndex = 0, Width = 140 };
+        var fit = new CheckBox { Content = "용지에 맞추기", IsChecked = true };
+        Control Field(string label, Control c) => new StackPanel { Spacing = 4, Children = { new TextBlock { Text = label, FontSize = 13, Foreground = Muted }, c } };
+        p.Children.Add(Field("프린터", printer));
+        p.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { Field("매수", copies), Field("방향", landscape) } });
+        p.Children.Add(fit);
+        var print = ColorDialog.DialogButton("인쇄", async () =>
+        {
+            if (printers.Length == 0) return;
+            var file = Path.Combine(Path.GetTempPath(), $"openpaint3d-print-{Environment.ProcessId}.png");
+            Export.SaveImage(_engine, file);
+            int orient = landscape.SelectedIndex == 0 ? (_engine.Width > _engine.Height ? 2 : 1) : landscape.SelectedIndex;
+            var args = new List<string> { "-d", printer.SelectedItem as string ?? printers[0], "-n", ((int)(copies.Value ?? 1)).ToString(), "-o", orient == 2 ? "landscape" : "portrait" };
+            if (fit.IsChecked == true) args.AddRange(new[] { "-o", "fit-to-page" });
+            args.Add(file);
+            try
+            {
+                using var proc = System.Diagnostics.Process.Start("lp", args);
+                await proc.WaitForExitAsync();
+                HideMenu();
+                await Ask("인쇄", proc.ExitCode == 0 ? "인쇄 작업을 프린터로 보냈습니다." : "인쇄 작업을 보내지 못했습니다.", "확인");
+            }
+            catch (Exception ex)
+            {
+                await Ask("인쇄할 수 없음", ex.Message, "확인");
+            }
+        });
+        print.IsEnabled = printers.Length > 0;
+        print.Width = 120;
+        var pdf = ColorDialog.DialogButton("PDF로 저장", () => _ = SavePdf(landscape.SelectedIndex));
+        pdf.Width = 140;
+        p.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Margin = new Thickness(0, 10, 0, 0), Children = { print, pdf } });
+        if (printers.Length == 0) p.Children.Add(Hint("CUPS에 등록된 프린터가 없습니다. 설정 > 프린터에서 추가하거나 PDF로 저장하세요."));
+    }
+
+    /// <summary>Save the picture centred on an A4 page as PDF.</summary>
+    private async Task SavePdf(int orientation)
+    {
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "PDF로 저장",
+            SuggestedFileName = Path.GetFileNameWithoutExtension(_path ?? "제목 없음") + ".pdf",
+            FileTypeChoices = new[] { new FilePickerFileType("PDF") { Patterns = new[] { "*.pdf" } } },
+        });
+        if (file?.TryGetLocalPath() is not { } path) return;
+        try
+        {
+            Export.SavePdf(_engine, path, orientation == 0 ? _engine.Width > _engine.Height : orientation == 2);
+            HideMenu();
+        }
+        catch (Exception ex)
+        {
+            await Ask("PDF로 저장할 수 없음", ex.Message, "확인");
+        }
+    }
+
+    /// <summary>Paint 3D's "3D 인쇄": export 3MF and hand it to the desktop's 3D printing app.</summary>
+    private async Task Print3D()
+    {
+        _surface.CommitPending();
+        if (_engine.ObjectCount == 0)
+        {
+            await Ask("3D 인쇄", "인쇄할 3D 개체가 없습니다. 3D 셰이프나 3D 라이브러리로 개체를 먼저 만드세요.", "확인");
+            return;
+        }
+        var file = Path.Combine(Path.GetTempPath(), $"openpaint3d-{DateTime.Now:yyyyMMddHHmmss}.3mf");
+        try
+        {
+            Export.Save3mf(_engine, file);
+            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("xdg-open", file) { UseShellExecute = false });
+            if (proc != null) await proc.WaitForExitAsync();
+            if (proc == null || proc.ExitCode != 0)
+                await Ask("3D 인쇄", $"3MF 파일을 열 앱이 없습니다. 파일은 여기에 저장했습니다:\n{file}\n\nPrusaSlicer나 Cura 같은 슬라이서에서 여세요.", "확인");
+        }
+        catch (Exception ex)
+        {
+            await Ask("3D 인쇄", ex.Message, "확인");
+        }
     }
 
     private async Task<bool> Save()

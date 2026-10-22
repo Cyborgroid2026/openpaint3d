@@ -53,12 +53,18 @@ public sealed class ToolState
     public string Font = "";
     public double FontSize = 48;
     public bool Bold, Italic, Underline, Text3D;
+    public bool TextBg;
+    public Color TextBgColor = Colors.White;
     public TextAlignment Align = TextAlignment.Left;
 
     // canvas / view
     public bool CropMode;
     public bool View3D;
     public bool HideCanvas;
+    public bool Perspective = true;
+
+    // select: clicking adds/removes objects instead of replacing the selection
+    public bool MultiSelect;
 }
 
 public sealed class PaintSurface : Canvas
@@ -67,7 +73,10 @@ public sealed class PaintSurface : Canvas
     public ToolState S { get; }
     public double Zoom { get; private set; } = 1;
     public Pending2D? Pending { get; private set; }
-    public uint Selected { get; private set; }
+    private readonly List<uint> _sel = new();
+    /// <summary>First selected 3D object (0 = none); <see cref="SelectedIds"/> has all of them.</summary>
+    public uint Selected => _sel.Count > 0 ? _sel[0] : 0;
+    public IReadOnlyList<uint> SelectedIds => _sel;
     public Rect Frame => _frame;
 
     public event Action? Changed;
@@ -78,7 +87,7 @@ public sealed class PaintSurface : Canvas
     private enum Drag
     {
         None, Stroke, Pan, NewBox, Doodle, PendMove, PendResize, PendRotate, CurvePoint,
-        ObjMove, ObjScale, ObjRotX, ObjRotY, ObjRotZ, ObjDepth, Frame, Orbit,
+        ObjMove, ObjScale, ObjRotX, ObjRotY, ObjRotZ, ObjDepth, Frame, Orbit, Marquee,
     }
 
     private WriteableBitmap? _bmp, _bmp3d;
@@ -92,6 +101,9 @@ public sealed class PaintSurface : Canvas
     private Rect _startBox;
     private double _startAngle;
     private ObjInfo _startObj;
+    private Dictionary<uint, ObjInfo> _starts = new();
+    private DateTime _lastNudge;
+    private ulong _nudgeStep;
     private readonly List<Point> _doodle = new();
     private Rect _frame;
     private double _yaw = 25, _pitch = -18, _zoom3d = 1;
@@ -123,7 +135,7 @@ public sealed class PaintSurface : Canvas
         {
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
-            Background = new SolidColorBrush(Color.FromArgb(20, 0, 120, 215)),
+            Background = EditorTint,
             BorderBrush = AccentBrush,
             BorderThickness = new Thickness(1),
             Padding = new Thickness(0),
@@ -205,7 +217,7 @@ public sealed class PaintSurface : Canvas
     {
         _quality = interactive ? 1 : 2;
         if (_frame.Width != W || _frame.Height != H) _frame = new Rect(0, 0, W, H);
-        if (Selected != 0 && Engine.Info(Selected) == null) Select(0);
+        if (_sel.Any(id => Engine.Info(id) == null)) SelectMany(_sel.Where(id => Engine.Info(id) != null).ToList());
         RefreshDisplay();
         if (interactive) { _hq.Stop(); _hq.Start(); }
         if (S.View3D) Render3D(1);
@@ -260,16 +272,18 @@ public sealed class PaintSurface : Canvas
             _zoom3d = Math.Clamp(_zoom3d * (e.Delta.Y > 0 ? 1.12 : 1 / 1.12), 0.2, 6);
             Render3D(1);
         }
-        else if (e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
         {
+            // Shift + wheel scrolls sideways
+            _pan += new Vector(e.Delta.Y + e.Delta.X, 0) * 40;
+        }
+        else if (e.Delta.Y != 0)
+        {
+            // like Paint 3D, the wheel zooms around the pointer
             var pos = e.GetPosition(this);
             var before = ToCanvas(pos);
             SetZoom(Zoom * (e.Delta.Y > 0 ? 1.15 : 1 / 1.15));
             _pan += pos - ToView(before);
-        }
-        else
-        {
-            _pan += new Vector(e.Delta.X, e.Delta.Y) * 40;
         }
         LayoutEditor();
         Redraw();
@@ -368,7 +382,7 @@ public sealed class PaintSurface : Canvas
                 ctx.DrawGeometry(new SolidColorBrush(S.Color, 0.35), new Pen(new SolidColorBrush(S.Color), 2), g);
         }
 
-        if (_drag == Drag.NewBox)
+        if (_drag is Drag.NewBox or Drag.Marquee)
         {
             var box = new Rect(_start, _cur).Normalize();
             if (S.Tool == Tool.Shape3D)
@@ -379,7 +393,7 @@ public sealed class PaintSurface : Canvas
             else ctx.DrawRectangle(null, Dash, box);
         }
 
-        if (Selected != 0 && Engine.Info(Selected) is { } info) DrawGizmo(ctx, info);
+        if (SelectionInfo() is { } info) DrawGizmo(ctx, info);
 
         if (S.Tool == Tool.Canvas) DrawFrame(ctx, dest);
 
@@ -691,7 +705,8 @@ public sealed class PaintSurface : Canvas
         }
 
         // 3D object gizmo / selection
-        if (Selected != 0 && Engine.Info(Selected) is { } info)
+        bool adding = S.MultiSelect || e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        if (SelectionInfo() is { } info && !adding)
         {
             var (r, hs) = GizmoLayout(info);
             int hi = HitList(pos, hs[..4], 7);
@@ -701,14 +716,14 @@ public sealed class PaintSurface : Canvas
             if (hi >= 0)
             {
                 _handle = hi;
-                _startObj = info;
+                StartObjects(info);
                 Engine.Checkpoint(Label.EditObject);
                 Begin(hi < 4 ? Drag.ObjScale : hi == 4 ? Drag.ObjRotX : hi == 5 ? Drag.ObjRotY : hi == 6 ? Drag.ObjRotZ : Drag.ObjDepth, e);
                 return;
             }
-            if (Engine.PickObject(c) == Selected || (r.Contains(pos) && S.Tool is Tool.Shape3D or Tool.Library or Tool.Select))
+            if (_sel.Contains(Engine.PickObject(c)) || (r.Contains(pos) && S.Tool is Tool.Shape3D or Tool.Library or Tool.Select))
             {
-                _startObj = info;
+                StartObjects(info);
                 Engine.Checkpoint(Label.EditObject);
                 Begin(Drag.ObjMove, e);
                 return;
@@ -716,13 +731,19 @@ public sealed class PaintSurface : Canvas
         }
         if (S.Tool is Tool.Shape3D or Tool.Library or Tool.Effects or Tool.Select && Engine.PickObject(c) is var hit and > 0)
         {
+            if (adding)
+            {
+                ToggleSelect(hit);
+                e.Handled = true;
+                return;
+            }
             Select(hit);
-            _startObj = Engine.Info(hit)!.Value;
+            StartObjects(SelectionInfo()!.Value);
             Engine.Checkpoint(Label.EditObject);
             Begin(Drag.ObjMove, e);
             return;
         }
-        if (Selected != 0) Select(0);
+        if (Selected != 0 && !adding) Select(0);
 
         switch (S.Tool)
         {
@@ -741,6 +762,9 @@ public sealed class PaintSurface : Canvas
                 break;
             case Tool.Shape2D or Tool.Shape3D or Tool.Sticker or Tool.Text:
                 Begin(Drag.NewBox, e);
+                break;
+            case Tool.Select when !adding:
+                Begin(Drag.Marquee, e);
                 break;
         }
         e.Handled = true;
@@ -785,6 +809,9 @@ public sealed class PaintSurface : Canvas
             case Drag.NewBox:
                 _cur = shift ? SquareFrom(_start, pos) : pos;
                 break;
+            case Drag.Marquee:
+                _cur = pos;
+                break;
             case Drag.PendMove when Pending is CurveItem curve:
                 curve.Translate(delta / Zoom);
                 break;
@@ -808,34 +835,35 @@ public sealed class PaintSurface : Canvas
                 break;
             case Drag.ObjMove:
                 var d = c - _startCanvas;
-                Engine.SetObject(Selected, new Vector3D(_startObj.Pos.X + d.X, _startObj.Pos.Y + d.Y, _startObj.Pos.Z), _startObj.Scale);
+                foreach (var (id, o) in _starts)
+                    Engine.SetObject(id, new Vector3D(o.Pos.X + d.X, o.Pos.Y + d.Y, o.Pos.Z), o.Scale);
                 Refresh(false, true);
                 break;
             case Drag.ObjScale:
+                // every selected object grows about the centre of the whole selection
                 var oc = ToView(_startObj.Screen.Center);
                 double k = Math.Max(0.05, Distance(pos, oc) / Math.Max(1, Distance(_start, oc)));
-                var s0 = _startObj.Scale;
-                Engine.SetObject(Selected, _startObj.Pos, new Vector3D(s0.X * k, s0.Y * k, s0.Z * k));
+                var mid = _startObj.Pos;
+                foreach (var (id, o) in _starts)
+                    Engine.SetObject(id, new Vector3D(mid.X + (o.Pos.X - mid.X) * k, mid.Y + (o.Pos.Y - mid.Y) * k, mid.Z + (o.Pos.Z - mid.Z) * k),
+                        new Vector3D(o.Scale.X * k, o.Scale.Y * k, o.Scale.Z * k));
                 Refresh(false, true);
                 break;
             case Drag.ObjRotX:
-                Engine.RotateObject(Selected, 0, -delta.Y * 0.6);
-                Refresh(false, true);
+                RotateSelection(0, -delta.Y * 0.6);
                 break;
             case Drag.ObjRotY:
-                Engine.RotateObject(Selected, 1, -delta.X * 0.6);
-                Refresh(false, true);
+                RotateSelection(1, -delta.X * 0.6);
                 break;
             case Drag.ObjRotZ:
                 var zc = ToView(_startObj.Screen.Center);
                 double b0 = Math.Atan2(_last.Y - zc.Y, _last.X - zc.X), b1 = Math.Atan2(pos.Y - zc.Y, pos.X - zc.X);
-                Engine.RotateObject(Selected, 2, (b1 - b0) * 180 / Math.PI);
-                Refresh(false, true);
+                RotateSelection(2, (b1 - b0) * 180 / Math.PI);
                 break;
             case Drag.ObjDepth:
-                var info = Engine.Info(Selected);
-                if (info is { } i2)
-                    Engine.SetObject(Selected, new Vector3D(i2.Pos.X, i2.Pos.Y, i2.Pos.Z + delta.Y / Zoom), i2.Scale);
+                foreach (var id in _sel)
+                    if (Engine.Info(id) is { } i2)
+                        Engine.SetObject(id, new Vector3D(i2.Pos.X, i2.Pos.Y, i2.Pos.Z + delta.Y / Zoom), i2.Scale);
                 Refresh(false, true);
                 break;
             case Drag.Frame:
@@ -936,6 +964,9 @@ public sealed class PaintSurface : Canvas
                 break;
             case Drag.NewBox:
                 CreateFromBox(new Rect(ToCanvas(_start), ToCanvas(_cur)).Normalize());
+                break;
+            case Drag.Marquee:
+                LiftSelection(new Rect(ToCanvas(_start), ToCanvas(_cur)).Normalize());
                 break;
             case Drag.Doodle:
                 CreateDoodle();
@@ -1147,18 +1178,99 @@ public sealed class PaintSurface : Canvas
     {
         if (Pending is not { } p || p is TextItem) return;
         using (var rtb = p.Rasterize(out var origin))
-            Engine.Blend(rtb, origin.X, origin.Y, p.Opacity, p.Finish, p.Label);
+            Engine.Blend(rtb, origin.X, origin.Y, p.Opacity, p.Finish, p.Label == Label.None ? Label.Selection : p.Label);
         if (p is CurveItem c) c.Translate(new Vector(24, 24));
         else p.Box = p.Box.Translate(new Vector(24, 24));
         Refresh();
     }
 
-    public void CancelPending()
+    /// <summary>
+    /// Drop the item being edited. A lifted selection goes back where it came from when
+    /// <paramref name="restore"/> is set (undo); otherwise its pixels are gone (delete).
+    /// </summary>
+    public void CancelPending(bool restore = true)
     {
+        if (Pending is SelectionItem { Lifted: true } sel && restore)
+        {
+            if (Engine.HistorySerial != sel.LiftedAt)
+            {
+                // stamped since lifting: take back the last stamp and keep the selection floating
+                Engine.Undo();
+                Refresh();
+                Redraw();
+                return;
+            }
+            // nothing else happened: forget the lift, the pixels go back where they were
+            Engine.UndoDiscard();
+            Refresh();
+        }
         CloseEditor();
         Pending = null;
         SelectionChanged?.Invoke();
         Redraw();
+    }
+
+    /// <summary>Pick up a rectangle of the canvas as an editable selection (select tool).</summary>
+    public void LiftSelection(Rect r)
+    {
+        CommitPending();
+        int x0 = (int)Math.Floor(Math.Max(0, r.X)), y0 = (int)Math.Floor(Math.Max(0, r.Y));
+        int x1 = (int)Math.Ceiling(Math.Min(W, r.Right)), y1 = (int)Math.Ceiling(Math.Min(H, r.Bottom));
+        if (x1 - x0 < 2 || y1 - y0 < 2) return;
+        var pr = new PixelRect(x0, y0, x1 - x0, y1 - y0);
+        if (Engine.CopyPixels(pr) is not { } img) return;
+        Engine.ClearRect(pr, Label.Selection);
+        Refresh();
+        SetPending(new SelectionItem { Image = img, Lifted = true, LiftedAt = Engine.HistorySerial, Box = new Rect(x0, y0, pr.Width, pr.Height) });
+    }
+
+    /// <summary>Paste pixels as a floating selection in the middle of the canvas.</summary>
+    public void BeginSelection(IImage img)
+    {
+        CommitPending();
+        Select(0);
+        double k = Math.Min(1, Math.Min(W * 0.9 / img.Size.Width, H * 0.9 / img.Size.Height));
+        var size = new Size(img.Size.Width * k, img.Size.Height * k);
+        SetPending(new SelectionItem { Image = img, Box = new Rect(new Point(Math.Round((W - size.Width) / 2), Math.Round((H - size.Height) / 2)), size) });
+    }
+
+    /// <summary>The selection as it looks now (rotation, flips and scale applied).</summary>
+    public RenderTargetBitmap? RenderPending() => Pending?.Rasterize(out _);
+
+    /// <summary>Move the edited item or the selected objects by a few canvas pixels (arrow keys).</summary>
+    public bool Nudge(Vector d)
+    {
+        if (Pending is CurveItem c) c.Translate(d);
+        else if (Pending is { } p)
+        {
+            if (_editor.IsVisible) return false;
+            p.Box = p.Box.Translate(d);
+        }
+        else if (_sel.Count > 0)
+        {
+            // a run of key presses is one history step
+            // a quick run of key presses is one history step, unless anything else touched the history
+            if (DateTime.Now - _lastNudge > TimeSpan.FromSeconds(1) || Engine.HistorySerial != _nudgeStep)
+            {
+                Engine.Checkpoint(Label.EditObject);
+                _nudgeStep = Engine.HistorySerial;
+            }
+            _lastNudge = DateTime.Now;
+            foreach (var id in _sel)
+                if (Engine.Info(id) is { } i)
+                    Engine.SetObject(id, new Vector3D(i.Pos.X + d.X, i.Pos.Y + d.Y, i.Pos.Z), i.Scale);
+            Refresh();
+        }
+        else return false;
+        Redraw();
+        return true;
+    }
+
+    public void SetPerspective(bool on)
+    {
+        S.Perspective = on;
+        Engine.Perspective = on;
+        if (S.View3D) Render3D(2);
     }
 
     /// <summary>Turn the editable 2D item into an extruded 3D object.</summary>
@@ -1247,7 +1359,12 @@ public sealed class PaintSurface : Canvas
         _editor.FontStyle = t.Italic ? FontStyle.Italic : FontStyle.Normal;
         _editor.Foreground = new SolidColorBrush(t.Color);
         _editor.TextAlignment = t.Align;
+        _editor.Background = t.FillBg ? new SolidColorBrush(t.BgColor) : EditorTint;
+        _editor.Resources["TextControlBackgroundFocused"] = _editor.Background;
+        _editor.Resources["TextControlBackgroundPointerOver"] = _editor.Background;
     }
+
+    private static readonly IBrush EditorTint = new SolidColorBrush(Color.FromArgb(20, 0, 120, 215));
 
     private void CloseEditor()
     {
@@ -1268,20 +1385,67 @@ public sealed class PaintSurface : Canvas
 
     // ------------------------------------------------------------- selection
 
-    public void Select(uint id)
+    /// <summary>Select one object together with the rest of its group (0 clears the selection).</summary>
+    public void Select(uint id) => SelectMany(id == 0 ? Array.Empty<uint>() : WithGroup(id));
+
+    public void SelectMany(IEnumerable<uint> ids)
     {
-        if (Selected == id) return;
-        Selected = id;
+        var list = ids.Distinct().ToList();
+        if (list.SequenceEqual(_sel)) return;
+        _sel.Clear();
+        _sel.AddRange(list);
         SelectionChanged?.Invoke();
         Redraw();
     }
 
+    /// <summary>Add an object (and its group) to the selection, or take it out again.</summary>
+    public void ToggleSelect(uint id)
+    {
+        var g = WithGroup(id).ToList();
+        SelectMany(_sel.Contains(id) ? _sel.Except(g).ToList() : _sel.Concat(g).ToList());
+    }
+
+    public void SelectAllObjects() => SelectMany(Engine.ObjectIds());
+
+    private IEnumerable<uint> WithGroup(uint id)
+    {
+        uint g = Engine.Group(id);
+        return g == 0 ? new[] { id } : new[] { id }.Concat(Engine.ObjectIds().Where(o => o != id && Engine.Group(o) == g));
+    }
+
+    /// <summary>Combined box of all selected objects; Pos is their average position.</summary>
+    public ObjInfo? SelectionInfo()
+    {
+        var infos = _sel.Select(id => Engine.Info(id)).OfType<ObjInfo>().ToList();
+        if (infos.Count == 0) return null;
+        if (infos.Count == 1) return infos[0];
+        var box = infos.Skip(1).Aggregate(infos[0].Screen, (r, i) => r.Union(i.Screen));
+        var pos = new Vector3D(infos.Average(i => i.Pos.X), infos.Average(i => i.Pos.Y), infos.Average(i => i.Pos.Z));
+        return infos[0] with { Pos = pos, Screen = box };
+    }
+
+    private void StartObjects(ObjInfo combined)
+    {
+        _startObj = combined;
+        _starts = _sel.Where(id => Engine.Info(id) != null).ToDictionary(id => id, id => Engine.Info(id)!.Value);
+    }
+
+    private void RotateSelection(int axis, double deg)
+    {
+        if (_sel.Count == 1) Engine.RotateObject(_sel[0], axis, deg);
+        else
+            foreach (var id in _sel) Engine.RotateObjectAbout(id, axis, deg, _startObj.Pos);
+        Refresh(false, true);
+    }
+
     public void DeleteSelection()
     {
-        if (Pending != null) CancelPending();
-        else if (Selected != 0 && Engine.DeleteObject(Selected))
+        if (Pending != null) CancelPending(restore: false);
+        else if (_sel.Count > 0)
         {
-            Selected = 0;
+            Engine.Checkpoint(Label.DeleteObject);
+            foreach (var id in _sel) Engine.RemoveObject(id);
+            _sel.Clear();
             Refresh();
             SelectionChanged?.Invoke();
         }
