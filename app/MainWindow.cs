@@ -2099,7 +2099,7 @@ public sealed class MainWindow : Window
                 p.Children.Add(Title("정보"));
                 p.Children.Add(new TextBlock
                 {
-                    Text = "OpenPaint 3D 0.4.0\n\nPaint 3D의 화면 구성과 기능 설명을 참고해 C#(Avalonia)과 Rust로 새로 만든 오픈소스 그림판입니다.\n" +
+                    Text = "OpenPaint 3D 0.4.1\n\nPaint 3D의 화면 구성과 기능 설명을 참고해 C#(Avalonia)과 Rust로 새로 만든 오픈소스 그림판입니다.\n" +
                            "Microsoft의 코드나 리소스는 포함되어 있지 않으며 Microsoft와 관련이 없습니다.",
                     TextWrapping = TextWrapping.Wrap,
                     FontSize = 14,

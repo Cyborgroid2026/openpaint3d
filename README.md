@@ -8,7 +8,7 @@ Microsoft의 코드, 아이콘, 리소스는 포함되어 있지 않으며 Micro
 [Releases](../../releases)에서 `openpaint3d_<버전>_amd64.deb`를 받아 설치합니다.
 
 ```
-sudo apt install ./openpaint3d_0.4.0_amd64.deb
+sudo apt install ./openpaint3d_0.4.1_amd64.deb
 ```
 
 ## 구성

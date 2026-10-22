@@ -23,6 +23,7 @@ internal static class Program
         }
         return AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            .AfterPlatformServicesSetup(_ => IBusKeycodeFix.Install())
             .LogToTrace()
             .StartWithClassicDesktopLifetime(args);
     }
